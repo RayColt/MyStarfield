@@ -73,7 +73,7 @@ struct RenderWindow
 };
 
 // Globals
-static HINSTANCE g_Hinst = NULL;
+static HINSTANCE g_hInst = NULL;
 static std::vector<RenderWindow*> g_Windows;
 static bool g_Running = true;
 
@@ -392,14 +392,14 @@ static BOOL CALLBACK MonEnumProc(HMONITOR hMon, HDC, LPRECT, LPARAM)
     {
         WNDCLASSW wc = {}; 
         wc.lpfnWndProc = FullWndProc; 
-        wc.hInstance = g_Hinst;
+        wc.hInstance = g_hInst;
         wc.lpszClassName = L"StarfieldFullClass";
         wc.hCursor = LoadCursor(NULL, IDC_ARROW);
         RegisterClassW(&wc); 
         reg = true;
     }
     HWND hwnd = CreateWindowExW(WS_EX_TOPMOST, L"StarfieldFullClass", L"Starfield", WS_POPUP | WS_VISIBLE,
-        r.left, r.top, r.right - r.left, r.bottom - r.top, NULL, NULL, g_Hinst, NULL);
+        r.left, r.top, r.right - r.left, r.bottom - r.top, NULL, NULL, g_hInst, NULL);
     if (!hwnd)
     {
         delete rw;
@@ -465,55 +465,83 @@ enum { CID_OK = 100, CID_CANCEL = 101, CID_EDIT_STARS = 110, CID_EDIT_SPEED = 11
 // Create child controls on given window
 static void CreateSettingsControls(HWND dlg)
 {
-    CreateWindowExW(0, L"STATIC", L"Star count:", WS_CHILD | WS_VISIBLE | SS_LEFT, 10, 10, 80, 18, dlg, NULL, g_Hinst, NULL);
-    CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", NULL, WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_LEFT, 100, 8, 80, 20, dlg, (HMENU)CID_EDIT_STARS, g_Hinst, NULL);
-    CreateWindowExW(0, L"STATIC", L"Speed:", WS_CHILD | WS_VISIBLE | SS_LEFT, 10, 40, 80, 18, dlg, NULL, g_Hinst, NULL);
-    CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", NULL, WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_LEFT, 100, 38, 80, 20, dlg, (HMENU)CID_EDIT_SPEED, g_Hinst, NULL);
-    CreateWindowExW(0, L"BUTTON", L"OK", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 80, 70, 80, 26, dlg, (HMENU)CID_OK, g_Hinst, NULL);
-    CreateWindowExW(0, L"BUTTON", L"Cancel", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 168, 70, 80, 26, dlg, (HMENU)CID_CANCEL, g_Hinst, NULL);
+    CreateWindowExW(0, L"STATIC", L"Star count:", WS_CHILD | WS_VISIBLE | SS_LEFT, 10, 10, 80, 18, dlg, NULL, g_hInst, NULL);
+    CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", NULL, WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_LEFT, 100, 8, 80, 20, dlg, (HMENU)CID_EDIT_STARS, g_hInst, NULL);
+    CreateWindowExW(0, L"STATIC", L"Speed:", WS_CHILD | WS_VISIBLE | SS_LEFT, 10, 40, 80, 18, dlg, NULL, g_hInst, NULL);
+    CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", NULL, WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_LEFT, 100, 38, 80, 20, dlg, (HMENU)CID_EDIT_SPEED, g_hInst, NULL);
+    CreateWindowExW(0, L"BUTTON", L"OK", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 80, 70, 80, 26, dlg, (HMENU)CID_OK, g_hInst, NULL);
+    CreateWindowExW(0, L"BUTTON", L"Cancel", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 168, 70, 80, 26, dlg, (HMENU)CID_CANCEL, g_hInst, NULL);  
 }
 
 // Settings window proc handles control actions and closes window
 LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
+    HWND parent = hWnd; // GetParent(hWnd);
     switch (msg)
     {
-        case WM_CREATE:
+    case WM_CREATE:
+    {
+        CreateSettingsControls(hWnd);
+        SetDlgItemInt(hWnd, CID_EDIT_STARS, g_StarCount, FALSE);
+        SetDlgItemInt(hWnd, CID_EDIT_SPEED, g_Speed, FALSE);
+        return 0;
+    }
+    case WM_COMMAND:
+    {
+        int id = LOWORD(wParam);
+        if (id == CID_OK)
         {
-            CreateSettingsControls(hWnd);
-            SetDlgItemInt(hWnd, CID_EDIT_STARS, g_StarCount, FALSE);
-            SetDlgItemInt(hWnd, CID_EDIT_SPEED, g_Speed, FALSE);
+            BOOL ok;
+            int stars = GetDlgItemInt(hWnd, CID_EDIT_STARS, &ok, FALSE);
+            if (!ok) stars = g_StarCount;
+            stars = std::fmax(10, std::fmin(g_MaxStars, stars));
+            int speed = GetDlgItemInt(hWnd, CID_EDIT_SPEED, &ok, FALSE);
+            if (!ok) speed = g_Speed;
+            speed = std::fmax(10, std::fmin(g_MaxSpeed, speed));
+            g_StarCount = stars;
+            g_Speed = speed;
+            SaveSettings();
+            DestroyWindow(hWnd);
             return 0;
         }
-        case WM_COMMAND:
+        else if (id == CID_CANCEL)
         {
-            int id = LOWORD(wParam);
-            if (id == CID_OK)
-            {
-                BOOL ok;
-                int stars = GetDlgItemInt(hWnd, CID_EDIT_STARS, &ok, FALSE); 
-                if (!ok) stars = g_StarCount;
-                stars = std::fmax(10, std::fmin(g_MaxStars, stars));
-                int speed = GetDlgItemInt(hWnd, CID_EDIT_SPEED, &ok, FALSE); 
-                if (!ok) speed = g_Speed;
-                speed = std::fmax(10, std::fmin(g_MaxSpeed, speed));
-                g_StarCount = stars; 
-                g_Speed = speed;
-                SaveSettings();
-                DestroyWindow(hWnd);
-                return 0;
-            }
-            else if (id == CID_CANCEL)
-            {
-                DestroyWindow(hWnd);
-                return 0;
-            }
-            break;
-        }
-        case WM_DESTROY:
+            DestroyWindow(hWnd);
             return 0;
-        default:
-            return DefWindowProcW(hWnd, msg, wParam, lParam);
+        }
+        break;
+    }
+    case WM_DESTROY:
+    {
+        if (parent && IsWindow(parent)) 
+        {
+            EnableWindow(parent, TRUE);
+            BringWindowToTop(parent);
+            SetActiveWindow(parent);
+            SetForegroundWindow(parent);
+            SetFocus(parent);
+
+            // If SetForegroundWindow did not take effect, use AttachThreadInput fallback
+            DWORD tidParent = GetWindowThreadProcessId(parent, NULL);
+            DWORD tidThis = GetCurrentThreadId();
+            if (tidParent != tidThis) 
+            {
+                AttachThreadInput(tidThis, tidParent, TRUE);
+                BringWindowToTop(parent);
+                SetForegroundWindow(parent);
+                SetActiveWindow(parent);
+                SetFocus(parent);
+                AttachThreadInput(tidThis, tidParent, FALSE);
+            }
+
+            // Ensure Z-order and visibility
+            SetWindowPos(parent, HWND_TOP, 0, 0, 0, 0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
+        }
+        return 0;
+    }
+    default:
+        return DefWindowProcW(hWnd, msg, wParam, lParam);
     }
     return 0;
 }
@@ -525,8 +553,8 @@ static void EnsureSettingsClassRegistered()
     if (reg) return;
     WNDCLASSW wc = {};
     wc.lpfnWndProc = SettingsWndProc;
-    wc.hInstance = g_Hinst;
-    wc.lpszClassName = L"StarfieldSettingsClass";
+    wc.hInstance = g_hInst;
+    wc.lpszClassName = L"MyStarfieldSettingsClass";
     wc.hCursor = LoadCursor(NULL, IDC_ARROW);
     wc.hbrBackground = (HBRUSH)(COLOR_BTNFACE + 1);
     RegisterClassW(&wc);
@@ -534,18 +562,26 @@ static void EnsureSettingsClassRegistered()
 }
 
 // Show modal popup (centered) and block until closed
-static int ShowSettingsModalPopup()
+static int ShowSettingsModalPopup(HWND parent)
 {
     EnsureSettingsClassRegistered();
+    HWND wParent = GetParent(parent);
+    if (IsWindow(wParent)) EnableWindow(wParent, FALSE);
+
     int w = 360, h = 144;
     int sw = GetSystemMetrics(SM_CXSCREEN), sh = GetSystemMetrics(SM_CYSCREEN);
     int x = (sw - w) / 2, y = (sh - h) / 2;
-    HWND dlg = CreateWindowExW(WS_EX_TOOLWINDOW, L"StarfieldSettingsClass", L"MyStarfield Settings",
-        WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU, x, y, w, h,
-        NULL, NULL, g_Hinst, NULL);
-    if (!dlg) { return -1; }
+
+    HWND dlg = CreateWindowExW(WS_EX_DLGMODALFRAME, L"MyStarfieldSettingsClass", L"MyStarfield Settings", WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU, x, y, w, h, parent, NULL, g_hInst, NULL);
+    if (!dlg) 
+    {
+        if (IsWindow(wParent)) EnableWindow(wParent, TRUE);
+        return -1;
+    }
+
     ShowWindow(dlg, SW_SHOW);
     UpdateWindow(dlg);
+
     // Modal message loop: run until dlg destroyed
     MSG msg;
     while (IsWindow(dlg) && GetMessageW(&msg, NULL, 0, 0))
@@ -553,6 +589,8 @@ static int ShowSettingsModalPopup()
         TranslateMessage(&msg);
         DispatchMessageW(&msg);
     }
+
+    if (IsWindow(wParent)) EnableWindow(wParent, TRUE);
     return 0;
 }
 
@@ -562,17 +600,19 @@ static int RunPreview(HWND parent)
     if (!IsWindow(parent)) return 0;
     WNDCLASSW wc = {};
     wc.lpfnWndProc = PreviewProc;
-    wc.hInstance = g_Hinst;
+    wc.hInstance = g_hInst;
     wc.lpszClassName = L"MyStarPre";
     RegisterClassW(&wc);
+
     RECT pr; 
     GetClientRect(parent, &pr);
-    HWND child = CreateWindowExW(0, wc.lpszClassName, L"", WS_CHILD | WS_VISIBLE, 0, 0, pr.right - pr.left, pr.bottom - pr.top, parent, NULL, g_Hinst, NULL);
+    HWND child = CreateWindowExW(0, wc.lpszClassName, L"", WS_CHILD | WS_VISIBLE, 0, 0, pr.right - pr.left, pr.bottom - pr.top, parent, NULL, g_hInst, NULL);
     if (!child)
     {
-        UnregisterClassW(wc.lpszClassName, g_Hinst);
+        UnregisterClassW(wc.lpszClassName, g_hInst);
         return 0;
     }
+
     RenderWindow* rw = new RenderWindow();
     rw->hwnd = child; 
     rw->isPreview = true; 
@@ -603,7 +643,7 @@ static int RunPreview(HWND parent)
     }
     DestroyBackbuffer(rw);
     DestroyWindow(child);
-    UnregisterClassW(wc.lpszClassName, g_Hinst);
+    UnregisterClassW(wc.lpszClassName, g_hInst);
     delete rw;
     return 0;
 }
@@ -611,7 +651,7 @@ static int RunPreview(HWND parent)
 // Entry point
 int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int) 
 {
-    g_Hinst = hInstance;
+    g_hInst = hInstance;
     LoadSettings();
     // log path for verification
     wchar_t modPath[MAX_PATH] = {};
@@ -629,7 +669,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int)
     }
     if (mode == 'c')
     {
-        ShowSettingsModalPopup();
+        ShowSettingsModalPopup(argH);
         LocalFree(argv); 
         return 0;
     }
