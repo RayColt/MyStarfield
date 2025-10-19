@@ -227,7 +227,8 @@ static void RenderFrame(RenderWindow* rw, float dt, float totalTime)
     {
         // advance depth
         s.z -= s.speed * dt * 0.5f;
-        if (s.z <= Z_MIN) {
+        if (s.z <= Z_MIN)
+        {
             // respawn centered and far
             std::uniform_real_distribution<float> ud01(0.0f, 1.0f);
             float fx = ud01(rw->rng), fy = ud01(rw->rng), fz = ud01(rw->rng);
@@ -272,7 +273,8 @@ static void RenderFrame(RenderWindow* rw, float dt, float totalTime)
         // skip if offscreen
         if (px + psz < 0 || px - psz > w || py + psz < 0 || py - psz > h) continue;
         HBRUSH oldBrush = nullptr;
-        if (brushes[bucket]) {
+        if (brushes[bucket]) 
+        {
             oldBrush = (HBRUSH)SelectObject(rw->backHdc, brushes[bucket]);
             Ellipse(rw->backHdc,
                 (int)floorf(px - psz), (int)floorf(py - psz),
