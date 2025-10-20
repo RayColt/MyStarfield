@@ -191,7 +191,7 @@ static void InitStars(RenderWindow* rw)
         float fy = ud01(rw->rng);
         float fz = ud01(rw->rng);
 
-        // centered world coords as in your samples
+        // centered world coords
         rw->stars[i].x = (fx - 0.5f) * (float)width * 2.0f;
         rw->stars[i].y = (fy - 0.5f) * (float)height * 2.0f;
 
@@ -257,11 +257,12 @@ static void RenderFrame(RenderWindow* rw, float dt, float totalTime)
         // map to bucket
         int bucket = (int)((intensity) / (256.0f / BUCKETS));
         bucket = max(0, min(BUCKETS - 1, bucket));
+        int br = (baseR * intensity) / 255;
+        int bg = (baseG * intensity) / 255;
+        int bb = (baseB * intensity) / 255;
+
         if (!brushes[bucket])
         {
-            int br = (baseR * intensity) / 255;
-            int bg = (baseG * intensity) / 255;
-            int bb = (baseB * intensity) / 255;
             // slightly move nearer buckets toward white for pop
             float whiten = 0.5f + 0.5f * (bucket / (float)(BUCKETS - 1));
             br = min(255, (int)lroundf(br * whiten + 255 * (1.0f - whiten)));
@@ -275,11 +276,22 @@ static void RenderFrame(RenderWindow* rw, float dt, float totalTime)
         HBRUSH oldBrush = nullptr;
         if (brushes[bucket]) 
         {
-            oldBrush = (HBRUSH)SelectObject(rw->backHdc, brushes[bucket]);
-            Ellipse(rw->backHdc,
-                (int)floorf(px - psz), (int)floorf(py - psz),
-                (int)ceilf(px + psz + 1), (int)ceilf(py + psz + 1));
-            SelectObject(rw->backHdc, oldBrush);
+            int ix = (int)lroundf(px);
+            int iy = (int)lroundf(py);
+            if (psz <= 1) 
+            {
+                // 1-pixel star: avoid creating a brush per star, used SetPixelV for speed
+                SetPixelV(rw->backHdc, ix, iy, RGB(br, bg, bb));
+            }
+            else 
+            {
+                // existing bucket brush approach for larger stars
+                HBRUSH oldBrush = (HBRUSH)SelectObject(rw->backHdc, brushes[bucket]);
+                Ellipse(rw->backHdc,
+                    ix - psz, iy - psz,
+                    ix + psz + 1, iy + psz + 1);
+                SelectObject(rw->backHdc, oldBrush);
+            }
         }
     }
 
