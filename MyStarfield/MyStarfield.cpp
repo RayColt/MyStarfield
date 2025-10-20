@@ -113,21 +113,27 @@ static void ParseArgs(int argc, wchar_t** argv, wchar_t& modeOut, HWND& hwndOut)
 }
 
 // ---- backbuffer helpers
+static void DestroyBackbuffer(RenderWindow* rw)
+{
+    if (!rw) return;
+    if (rw->backHdc)
+    {
+        SelectObject(rw->backHdc, rw->oldBackBmp);
+        DeleteObject(rw->backBmp);
+        DeleteDC(rw->backHdc);
+        rw->backHdc = NULL;
+        rw->backBmp = NULL;
+        rw->oldBackBmp = NULL;
+    }
+}
+
 static bool CreateBackbuffer(RenderWindow* rw)
 {
     if (!rw || !rw->hwnd) return false;
     HDC wnd = GetDC(rw->hwnd);
     if (!wnd) return false;
     // release existing
-    if (rw->backHdc)
-    {
-        SelectObject(rw->backHdc, rw->oldBackBmp);
-        DeleteObject(rw->backBmp);
-        DeleteDC(rw->backHdc);
-        rw->backHdc = NULL; 
-        rw->backBmp = NULL; 
-        rw->oldBackBmp = NULL;
-    }
+    DestroyBackbuffer(rw);
     int w = max(1, rw->rc.right - rw->rc.left);
     int h = max(1, rw->rc.bottom - rw->rc.top);
     HDC mem = CreateCompatibleDC(wnd);
@@ -147,20 +153,6 @@ static bool CreateBackbuffer(RenderWindow* rw)
     FillRect(rw->backHdc, &rc, b);
     ReleaseDC(rw->hwnd, wnd);
     return true;
-}
-
-static void DestroyBackbuffer(RenderWindow* rw)
-{
-    if (!rw) return;
-    if (rw->backHdc)
-    {
-        SelectObject(rw->backHdc, rw->oldBackBmp);
-        DeleteObject(rw->backBmp);
-        DeleteDC(rw->backHdc);
-        rw->backHdc = NULL; 
-        rw->backBmp = NULL; 
-        rw->oldBackBmp = NULL;
-    }
 }
 
 // InitStars: centered world coords (so projection works predictably)
