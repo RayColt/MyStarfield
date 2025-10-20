@@ -421,6 +421,7 @@ static BOOL CALLBACK MonEnumProc(HMONITOR hMon, HDC, LPRECT, LPARAM)
     }
     rw->hwnd = hwnd;
     SetWindowLongPtrW(hwnd, GWLP_USERDATA, (LONG_PTR)rw);
+    ShowCursor(FALSE);
     ShowWindow(hwnd, SW_SHOW);
     GetClientRect(hwnd, &rw->rc);
     CreateBackbuffer(rw);
@@ -656,6 +657,7 @@ static int RunPreview(HWND parent)
         Sleep(15);
     }
     DestroyBackbuffer(rw);
+    ShowCursor(TRUE);
     DestroyWindow(child);
     UnregisterClassW(wc.lpszClassName, g_hInst);
     delete rw;
