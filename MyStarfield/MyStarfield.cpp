@@ -292,6 +292,13 @@ static void RenderFrame(RenderWindow* rw, float dt, float totalTime)
                     ix + psz + 1, iy + psz + 1);
                 SelectObject(rw->backHdc, oldBrush);
             }
+            /* Old if (brushes[bucket]){}/Ellipse part with 2px stars
+                    HBRUSH oldBrush = (HBRUSH)SelectObject(rw->backHdc, brushes[bucket]);
+                    Ellipse(rw->backHdc,
+                        (int)floorf(px - psz), (int)floorf(py - psz),
+                        (int)ceilf(px + psz + 1), (int)ceilf(py + psz + 1));
+                    SelectObject(rw->backHdc, oldBrush);
+            */
         }
     }
 
