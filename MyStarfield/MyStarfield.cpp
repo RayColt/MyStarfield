@@ -172,7 +172,7 @@ static const float Z_MAX = 33.0f;
 // FOCAL ~ 1.0 is appropriate for the sample values (x ~ [-1600..1600], z ~ [10..100])
 static const float FOCAL = 9.0f;
 // multiplier that controls drawn core size; increase for larger stars
-static const float SIZE_SCALE = 1.0f;
+static const float SIZE_SCALE = 1.2f;
 
 static void InitStars(RenderWindow* rw)
 {
