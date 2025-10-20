@@ -260,7 +260,6 @@ static void RenderFrame(RenderWindow* rw, float dt, float totalTime)
         int br = (baseR * intensity) / 255;
         int bg = (baseG * intensity) / 255;
         int bb = (baseB * intensity) / 255;
-
         if (!brushes[bucket])
         {
             // slightly move nearer buckets toward white for pop
@@ -270,7 +269,6 @@ static void RenderFrame(RenderWindow* rw, float dt, float totalTime)
             bb = min(255, (int)lroundf(bb * whiten + 255 * (1.0f - whiten)));
             brushes[bucket] = CreateSolidBrush(RGB(br, bg, bb));
         }
-
         // skip if offscreen
         if (px + psz < 0 || px - psz > w || py + psz < 0 || py - psz > h) continue;
         HBRUSH oldBrush = nullptr;
