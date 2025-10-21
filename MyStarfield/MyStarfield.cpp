@@ -4,7 +4,7 @@
 
 #include <windows.h>
 #include <random>
-
+#pragma comment(lib, "d2d1.lib")
 // ---- Config / registry keys
 static LPCWSTR REG_KEY = L"Software\\StarfieldScreensaver";
 static LPCWSTR REG_STARS = L"StarCount";
@@ -80,7 +80,7 @@ static bool g_Running = true;
 // Input filtering
 static LARGE_INTEGER g_PerfFreq;
 static LARGE_INTEGER g_StartCounter;
-static double g_InputDebounceSeconds = 0.66; // mouse movement speed to stop screensaver from running
+static double g_InputDebounceSeconds = 0.66; // time to stop screensaver after mouse move
 static POINT g_StartMouse = { 0,0 };
 static bool g_StartMouseInit = false;
 static const int g_MouseMoveThreshold = 12; // pixels
@@ -164,7 +164,7 @@ static const float Z_MAX = 33.0f;
 // FOCAL ~ 1.0 is appropriate for the sample values (x ~ [-1600..1600], z ~ [10..100])
 static const float FOCAL = 9.0f;
 // multiplier that controls drawn core size; increase for larger stars
-static const float SIZE_SCALE = 1.1f;
+static const float SIZE_SCALE = 1.0f;
 
 static void InitStars(RenderWindow* rw)
 {
@@ -277,9 +277,7 @@ static void RenderFrame(RenderWindow* rw, float dt, float totalTime)
             {
                 // existing bucket brush approach for larger stars
                 HBRUSH oldBrush = (HBRUSH)SelectObject(rw->backHdc, brushes[bucket]);
-                Ellipse(rw->backHdc,
-                    ix - psz, iy - psz,
-                    ix + psz + 1, iy + psz + 1);
+                Ellipse(rw->backHdc, ix - psz, iy - psz, ix + psz + 1, iy + psz + 1);
                 SelectObject(rw->backHdc, oldBrush);
             }
             /* Old if (brushes[bucket]){}/Ellipse part with 2px stars
