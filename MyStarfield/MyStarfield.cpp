@@ -4,7 +4,7 @@
 
 #include <windows.h>
 #include <random>
-#pragma comment(lib, "d2d1.lib")
+
 // ---- Config / registry keys
 static LPCWSTR REG_KEY = L"Software\\StarfieldScreensaver";
 static LPCWSTR REG_STARS = L"StarCount";
