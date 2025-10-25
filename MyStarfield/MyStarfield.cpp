@@ -1,7 +1,6 @@
 ﻿// Starfield.cpp
 // Build as Windows GUI (/SUBSYSTEM:WINDOWS)
 // Copy generated Starfield.scr in Debug directory to C:\Windows\System32
-
 #include <windows.h>
 #include <random>
 
@@ -504,12 +503,15 @@ LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPar
             BOOL ok;
             int stars = GetDlgItemInt(hWnd, CID_EDIT_STARS, &ok, FALSE);
             if (!ok) stars = g_StarCount;
-            stars = std::fmax(10, std::fmin(g_MaxStars, stars));
+            stars = (int) std::fmax(10, std::fmin(g_MaxStars, stars));
+
             int speed = GetDlgItemInt(hWnd, CID_EDIT_SPEED, &ok, FALSE);
             if (!ok) speed = g_Speed;
-            speed = std::fmax(10, std::fmin(g_MaxSpeed, speed));
+            speed = (int) std::fmax(10, std::fmin(g_MaxSpeed, speed));
+
             g_StarCount = stars;
             g_Speed = speed;
+
             SaveSettings();
             DestroyWindow(hWnd);
             return 0;
@@ -599,7 +601,7 @@ static int ShowSettingsModalPopup(HWND parent)
         TranslateMessage(&msg);
         DispatchMessageW(&msg);
     }
-
+    
     if (IsWindow(wParent)) EnableWindow(wParent, TRUE);
     return 0;
 }
@@ -664,11 +666,9 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int)
 {
     g_hInst = hInstance;
     LoadSettings();
-    // log path for verification
     wchar_t modPath[MAX_PATH] = {};
     GetModuleFileNameW(NULL, modPath, MAX_PATH);
     char pathLog[512];
-    sprintf_s(pathLog, "Running from: %ws", modPath);
     int argc = 0;
     wchar_t** argv = CommandLineToArgvW(GetCommandLineW(), &argc);
     wchar_t mode = 0;
@@ -676,7 +676,6 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int)
     ParseArgs(argc, argv, mode, argH);
     {
         char buf[256];
-        sprintf_s(buf, "Parsed args mode=%c hwnd=%p", mode ? (char)mode : '0', argH);
     }
     if (mode == 'c')
     {
