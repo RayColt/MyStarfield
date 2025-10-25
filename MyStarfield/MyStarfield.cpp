@@ -3,13 +3,7 @@
 // Copy generated Starfield.scr in Debug directory to C:\Windows\System32
 
 #include <windows.h>
-#include <string>
-#include <vector>
 #include <random>
-#include <fstream>
-#include <shellapi.h>
-#include <cmath>
-#include <algorithm>
 
 // ---- Config / registry keys
 static LPCWSTR REG_KEY = L"Software\\MyStarfield";
