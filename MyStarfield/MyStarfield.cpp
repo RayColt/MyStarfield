@@ -601,7 +601,6 @@ static int ShowSettingsModalPopup(HWND parent)
         TranslateMessage(&msg);
         DispatchMessageW(&msg);
     }
-    
     if (IsWindow(wParent)) EnableWindow(wParent, TRUE);
     return 0;
 }
