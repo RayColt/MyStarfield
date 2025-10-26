@@ -1,6 +1,6 @@
-﻿// Starfield.cpp
+﻿// MyStarfield.cpp
 // Build as Windows GUI (/SUBSYSTEM:WINDOWS)
-// Copy generated Starfield.scr in Debug directory to C:\Windows\System32
+// Copy generated MyStarfield.scr in Debug directory to C:\Windows\System32
 #include <windows.h>
 #include <random>
 
@@ -668,14 +668,13 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int)
     LoadSettings();
     wchar_t modPath[MAX_PATH] = {};
     GetModuleFileNameW(NULL, modPath, MAX_PATH);
-    char pathLog[512];
     int argc = 0;
     wchar_t** argv = CommandLineToArgvW(GetCommandLineW(), &argc);
     wchar_t mode = 0;
     HWND argH = NULL;
     ParseArgs(argc, argv, mode, argH);
     {
-        char buf[256];
+        char buf[256]{};
     }
     if (mode == 'c')
     {
