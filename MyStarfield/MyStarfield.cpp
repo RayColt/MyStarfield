@@ -10,8 +10,8 @@ static LPCWSTR REG_STARS = L"StarCount";
 static LPCWSTR REG_SPEED = L"SpeedPercent";
 
 // Defaults
-static int g_StarCount = 2048;
-static int g_Speed = 10;
+static int g_StarCount = 667;
+static int g_Speed = 9;
 static int g_MaxStars = 1024;
 static int g_MaxSpeed = 256;
 static COLORREF g_Color = RGB(255, 255, 255);// Star Color!
