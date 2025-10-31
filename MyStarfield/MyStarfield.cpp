@@ -2,7 +2,7 @@
 // Build as Windows GUI (/SUBSYSTEM:WINDOWS)
 // Copy generated MyStarfield.scr in Debug directory to C:\Windows\System32
 #include <windows.h>
-#include <commdlg.h>   // for ChooseColor
+#include <commdlg.h>
 #include <random>
 
 // ---- Config / registry keys
