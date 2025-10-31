@@ -4,7 +4,6 @@
 #include <windows.h>
 #include <commdlg.h>   // for ChooseColor
 #include <random>
-//#pragma comment(lib, "Comdlg32.lib")
 
 // ---- Config / registry keys
 static LPCWSTR REG_KEY = L"Software\\MyStarfield";
