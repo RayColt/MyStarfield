@@ -2,19 +2,23 @@
 // Build as Windows GUI (/SUBSYSTEM:WINDOWS)
 // Copy generated MyStarfield.scr in Debug directory to C:\Windows\System32
 #include <windows.h>
+#include <commdlg.h>   // for ChooseColor
 #include <random>
+//#pragma comment(lib, "Comdlg32.lib")
 
 // ---- Config / registry keys
 static LPCWSTR REG_KEY = L"Software\\MyStarfield";
 static LPCWSTR REG_STARS = L"StarCount";
-static LPCWSTR REG_SPEED = L"SpeedPercent";
+static LPCWSTR REG_SPEED = L"Speed";
+static LPCWSTR REG_COLOR = L"Color";
 
 // Defaults
 static int g_StarCount = 667;
 static int g_Speed = 9;
 static int g_MaxStars = 1024;
 static int g_MaxSpeed = 256;
-static COLORREF g_Color = RGB(255, 255, 255);// Star Color!
+static COLORREF g_CurrentStarColor = RGB(255, 255, 255);// Star Color!
+HBRUSH   g_hBrushColor = NULL;
 
 // Registry helpers
 static int GetRegDWORD(LPCWSTR name, int def)
@@ -42,11 +46,13 @@ static void LoadSettings()
 {
     g_StarCount = GetRegDWORD(REG_STARS, g_StarCount);
     g_Speed = GetRegDWORD(REG_SPEED, g_Speed);
+	g_CurrentStarColor = GetRegDWORD(REG_COLOR, g_CurrentStarColor);
 }
 static void SaveSettings()
 {
     SetRegDWORD(REG_STARS, (DWORD)g_StarCount);
     SetRegDWORD(REG_SPEED, (DWORD)g_Speed);
+	SetRegDWORD(REG_COLOR, (DWORD)g_CurrentStarColor);
 }
 
 // Star model
@@ -205,7 +211,7 @@ static void RenderFrame(RenderWindow* rw, float dt, float totalTime)
     FillRect(rw->backHdc, &fill, (HBRUSH)GetStockObject(BLACK_BRUSH));
 
     HPEN oldPen = (HPEN)SelectObject(rw->backHdc, GetStockObject(NULL_PEN));
-    int baseR = GetRValue(g_Color), baseG = GetGValue(g_Color), baseB = GetBValue(g_Color);
+    int baseR = GetRValue(g_CurrentStarColor), baseG = GetGValue(g_CurrentStarColor), baseB = GetBValue(g_CurrentStarColor);
 
     // subtle pulse
     float pulse = 1.0f + 0.05f * sinf(totalTime * 1.5f);
@@ -462,15 +468,20 @@ static void RunFull()
 
 // ---------------- Settings dialog programmatic UI ----------------
 // IDs
-enum { CID_OK = 100, CID_CANCEL = 101, CID_EDIT_STARS = 110, CID_EDIT_SPEED = 111, CID_PREVIEW = 112 };
+enum { CID_OK = 100, CID_CANCEL = 101, CID_EDIT_STARS = 110, CID_EDIT_SPEED = 111, CID_PREVIEW = 112, CID_BUTTON_COLOR = 113, CID_LABEL_COLOR=114 };
 
 // Create child controls on given window
 static void CreateSettingsControls(HWND dlg)
 {
     CreateWindowExW(0, L"STATIC", L"Star count:", WS_CHILD | WS_VISIBLE | SS_LEFT, 10, 10, 80, 18, dlg, NULL, g_hInst, NULL);
     CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", NULL, WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_LEFT, 100, 8, 80, 20, dlg, (HMENU)CID_EDIT_STARS, g_hInst, NULL);
+  
     CreateWindowExW(0, L"STATIC", L"Speed:", WS_CHILD | WS_VISIBLE | SS_LEFT, 10, 40, 80, 18, dlg, NULL, g_hInst, NULL);
     CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", NULL, WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_LEFT, 100, 38, 80, 20, dlg, (HMENU)CID_EDIT_SPEED, g_hInst, NULL);
+   
+    CreateWindowExW(0, L"BUTTON", L"Pick color", WS_CHILD | WS_VISIBLE, 200, 8, 80, 18, dlg, (HMENU)CID_BUTTON_COLOR, g_hInst, NULL);
+    CreateWindowExW(0, L"STATIC", L"     ",  WS_CHILD | WS_VISIBLE | SS_SIMPLE | SS_BLACKFRAME, 200, 38, 80, 18, dlg, (HMENU)CID_LABEL_COLOR, g_hInst, NULL);
+
     CreateWindowExW(0, L"BUTTON", L"OK", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 80, 70, 80, 26, dlg, (HMENU)CID_OK, g_hInst, NULL);
     CreateWindowExW(0, L"BUTTON", L"Cancel", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 168, 70, 80, 26, dlg, (HMENU)CID_CANCEL, g_hInst, NULL);  
 }
@@ -479,6 +490,8 @@ static void CreateSettingsControls(HWND dlg)
 LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
     HWND parent = hWnd; // GetParent(hWnd);
+    HWND hColorLabel = GetDlgItem(hWnd, CID_LABEL_COLOR);
+    g_hBrushColor = CreateSolidBrush(g_CurrentStarColor);
     switch (msg)
     {
     case WM_CREATE:
@@ -491,16 +504,36 @@ LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPar
     case WM_COMMAND:
     {
         int id = LOWORD(wParam);
-        if (id == CID_OK)
+        if (id == CID_BUTTON_COLOR)
+        {
+            CHOOSECOLOR cc = {};
+            static COLORREF acrCustClr[16]; // custom colors
+            ZeroMemory(&cc, sizeof(cc));
+            cc.lStructSize = sizeof(cc);
+            cc.hwndOwner = hWnd; // parent window handle
+            cc.lpCustColors = (LPDWORD)acrCustClr;
+            cc.rgbResult = g_CurrentStarColor; // initial color
+            cc.Flags = CC_FULLOPEN | CC_RGBINIT;
+           
+            if (ChooseColor(&cc)) 
+            {
+                g_CurrentStarColor = cc.rgbResult;
+                if (g_hBrushColor) DeleteObject(g_hBrushColor);
+                g_hBrushColor = CreateSolidBrush(g_CurrentStarColor);
+                InvalidateRect(hColorLabel, NULL, TRUE);
+            }
+            return 0;
+        }
+        else if (id == CID_OK)
         {
             BOOL ok;
             int stars = GetDlgItemInt(hWnd, CID_EDIT_STARS, &ok, FALSE);
             if (!ok) stars = g_StarCount;
-            stars = (int) std::fmax(1, std::fmin(g_MaxStars, stars));
+            stars = (int)std::fmax(1, std::fmin(g_MaxStars, stars));
 
             int speed = GetDlgItemInt(hWnd, CID_EDIT_SPEED, &ok, FALSE);
             if (!ok) speed = g_Speed;
-            speed = (int) std::fmax(1, std::fmin(g_MaxSpeed, speed));
+            speed = (int)std::fmax(1, std::fmin(g_MaxSpeed, speed));
 
             g_StarCount = stars;
             g_Speed = speed;
@@ -513,6 +546,18 @@ LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPar
         {
             DestroyWindow(hWnd);
             return 0;
+        }
+        break;
+    }
+    case WM_CTLCOLORSTATIC:
+    {
+        HDC hdcStatic = (HDC)wParam;
+        HWND hStatic = (HWND)lParam;
+
+        if (GetDlgCtrlID(hStatic) == CID_LABEL_COLOR) {
+            SetBkMode(hdcStatic, OPAQUE);
+            SetBkColor(hdcStatic, g_CurrentStarColor);
+            return (INT_PTR)g_hBrushColor;
         }
         break;
     }
@@ -542,6 +587,12 @@ LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPar
             // Ensure Z-order and visibility
             SetWindowPos(parent, HWND_TOP, 0, 0, 0, 0,
                 SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
+            
+            if (g_hBrushColor)
+            {
+                DeleteObject(g_hBrushColor);
+                g_hBrushColor = NULL;
+            }
         }
         return 0;
     }
