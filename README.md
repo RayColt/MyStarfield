@@ -10,4 +10,4 @@ Copy generated MyStarfield.scr in Root/Debug directory to C:\Windows\System32,<b
 select it in Settings/Personalization/Lock screen/Screen saver.
 
 <img src=https://github.com/RayColt/MyStarfield/blob/master/.gitfiles/MyStarfield.gif>
-<img src=https://github.com/RayColt/MyStarfield/blob/master/.gitfiles/starfield.jpg>
+<img src=https://github.com/RayColt/MyStarfield/blob/master/.gitfiles/mystarfield.jpg>
