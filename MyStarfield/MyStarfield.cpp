@@ -3,6 +3,7 @@
 // Copy generated MyStarfield.scr in Debug directory to C:\Windows\System32
 #include <windows.h>
 #include <random>
+#include <string>
 
 // ---- Config / registry keys
 static LPCWSTR REG_KEY = L"Software\\MyStarfield";
@@ -13,8 +14,8 @@ static LPCWSTR REG_COLOR = L"Color";
 // Defaults
 static int g_StarCount = 667;
 static int g_Speed = 9;
-static int g_MaxStars = 1024;
-static int g_MaxSpeed = 256;
+static int g_MaxStars = 1000;
+static int g_MaxSpeed = 250;
 static COLORREF g_CurrentStarColor = RGB(255, 255, 255);// Default Star Color!
 HBRUSH g_hBrushColor = NULL;
 
@@ -524,18 +525,21 @@ static int RunPreview(HWND parent)
 enum { CID_OK = 100, CID_CANCEL = 101, CID_EDIT_STARS = 110, CID_EDIT_SPEED = 111, CID_PREVIEW = 112, CID_BUTTON_COLOR = 113, CID_LABEL_COLOR = 114 };
 
 // Create child controls on given window
-// TODO: add max speed and max stars
 static void CreateSettingsControls(HWND dlg)
 {
+    std::wstring mst = L"Stars (max " + std::to_wstring(g_MaxStars) + L"):";
+    std::wstring msp = L"Speed (max " + std::to_wstring(g_MaxSpeed) + L"):";
     HFONT hFont = CreateFontW(18, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
-    HWND hColorLabel = CreateWindowExW(0, L"STATIC", L"Star count:", WS_CHILD | WS_VISIBLE | SS_LEFT, 10, 10, 80, 18, dlg, NULL, g_hInst, NULL);
-    HWND hColorEdit = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", NULL, WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_LEFT, 100, 8, 80, 20, dlg, (HMENU)CID_EDIT_STARS, g_hInst, NULL);
-    HWND hSpeedLabel = CreateWindowExW(0, L"STATIC", L"Speed:", WS_CHILD | WS_VISIBLE | SS_LEFT, 10, 40, 80, 18, dlg, NULL, g_hInst, NULL);
-    HWND hSpeedEdit = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", NULL, WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_LEFT, 100, 38, 80, 20, dlg, (HMENU)CID_EDIT_SPEED, g_hInst, NULL);
-    HWND hColorButton = CreateWindowExW(0, L"BUTTON", L"Pick color", WS_CHILD | WS_VISIBLE, 200, 8, 80, 24, dlg, (HMENU)CID_BUTTON_COLOR, g_hInst, NULL);
-    CreateWindowExW(0, L"STATIC", L"     ",  WS_CHILD | WS_VISIBLE | SS_SIMPLE | SS_BLACKFRAME, 200, 38, 80, 26, dlg, (HMENU)CID_LABEL_COLOR, g_hInst, NULL);
+    
+    HWND hColorLabel = CreateWindowExW(0, L"STATIC", mst.c_str(), WS_CHILD | WS_VISIBLE | SS_LEFT, 10, 10, 120, 18, dlg, NULL, g_hInst, NULL);
+    HWND hColorEdit = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", NULL, WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_LEFT, 150, 8, 80, 20, dlg, (HMENU)CID_EDIT_STARS, g_hInst, NULL);
+    HWND hSpeedLabel = CreateWindowExW(0, L"STATIC", msp.c_str(), WS_CHILD | WS_VISIBLE | SS_LEFT, 10, 40, 120, 18, dlg, NULL, g_hInst, NULL);
+    HWND hSpeedEdit = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", NULL, WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_LEFT, 150, 38, 80, 20, dlg, (HMENU)CID_EDIT_SPEED, g_hInst, NULL);
+    HWND hColorButton = CreateWindowExW(0, L"BUTTON", L"Pick color", WS_CHILD | WS_VISIBLE, 250, 8, 80, 24, dlg, (HMENU)CID_BUTTON_COLOR, g_hInst, NULL);
+    CreateWindowExW(0, L"STATIC", L"     ",  WS_CHILD | WS_VISIBLE | SS_SIMPLE | SS_BLACKFRAME, 250, 38, 80, 26, dlg, (HMENU)CID_LABEL_COLOR, g_hInst, NULL);
     HWND hOkButton = CreateWindowExW(0, L"BUTTON", L"OK", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 80, 70, 80, 24, dlg, (HMENU)CID_OK, g_hInst, NULL);
     HWND hCancelButton = CreateWindowExW(0, L"BUTTON", L"Cancel", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 168, 70, 80, 24, dlg, (HMENU)CID_CANCEL, g_hInst, NULL);
+    
     SendMessageW(hColorLabel, WM_SETFONT, (WPARAM)hFont, TRUE);
     SendMessageW(hColorEdit, WM_SETFONT, (WPARAM)hFont, TRUE);
     SendMessageW(hSpeedLabel, WM_SETFONT, (WPARAM)hFont, TRUE);
