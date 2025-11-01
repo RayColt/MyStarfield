@@ -16,7 +16,7 @@ static int g_Speed = 9;
 static int g_MaxStars = 1024;
 static int g_MaxSpeed = 256;
 static COLORREF g_CurrentStarColor = RGB(255, 255, 255);// Default Star Color!
-HBRUSH   g_hBrushColor = NULL;
+HBRUSH g_hBrushColor = NULL;
 
 // Registry helpers
 static int GetRegDWORD(LPCWSTR name, int def)
