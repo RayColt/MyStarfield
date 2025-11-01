@@ -15,7 +15,7 @@ static int g_StarCount = 667;
 static int g_Speed = 9;
 static int g_MaxStars = 1024;
 static int g_MaxSpeed = 256;
-static COLORREF g_CurrentStarColor = RGB(255, 255, 255);// Star Color!
+static COLORREF g_CurrentStarColor = RGB(255, 255, 255);// Default Star Color!
 HBRUSH   g_hBrushColor = NULL;
 
 // Registry helpers
@@ -238,7 +238,7 @@ static void RenderFrame(RenderWindow* rw, float dt, float totalTime)
         float px = cx + s.x * (FOCAL / s.z);
         float py = cy + s.y * (FOCAL / s.z);
 
-        // size scales with inverse depth; near -> larger
+        // star size scales with inverse depth; near -> larger
         float inv = (Z_MIN / s.z); // near => closer to 1
         int psz = (int)ceilf(max(1.0f, SIZE_SCALE * inv));
         if (psz > 128) psz = 128;
@@ -464,24 +464,84 @@ static void RunFull()
     g_Windows.clear();
 }
 
+// Simple preview runner
+static int RunPreview(HWND parent)
+{
+    if (!IsWindow(parent)) return 0;
+    WNDCLASSW wc = {};
+    wc.lpfnWndProc = PreviewProc;
+    wc.hInstance = g_hInst;
+    wc.lpszClassName = L"MyStarPre";
+    RegisterClassW(&wc);
+
+    RECT pr;
+    GetClientRect(parent, &pr);
+    HWND child = CreateWindowExW(0, wc.lpszClassName, L"", WS_CHILD | WS_VISIBLE, 0, 0, pr.right - pr.left, pr.bottom - pr.top, parent, NULL, g_hInst, NULL);
+    if (!child)
+    {
+        UnregisterClassW(wc.lpszClassName, g_hInst);
+        return 0;
+    }
+
+    RenderWindow* rw = new RenderWindow();
+    rw->hwnd = child;
+    rw->isPreview = true;
+    rw->rc = pr;
+    std::random_device rd;
+    rw->rng.seed(rd());
+    CreateBackbuffer(rw);
+    InitStars(rw);
+    QueryPerformanceFrequency(&g_PerfFreq);
+    LARGE_INTEGER last;
+    QueryPerformanceCounter(&last);
+    double total = 0.0;
+    MSG msg;
+    while (IsWindow(child))
+    {
+        while (PeekMessageW(&msg, NULL, 0, 0, PM_REMOVE))
+        {
+            if (msg.message == WM_QUIT) { DestroyWindow(child); break; }
+            TranslateMessage(&msg);
+            DispatchMessageW(&msg);
+        }
+        LARGE_INTEGER now;
+        QueryPerformanceCounter(&now);
+        double dt = double(now.QuadPart - last.QuadPart) / double(g_PerfFreq.QuadPart);
+        last = now; total += dt;
+        RenderFrame(rw, (float)dt, (float)total);
+        Sleep(15);
+    }
+    DestroyBackbuffer(rw);
+    ShowCursor(TRUE);
+    DestroyWindow(child);
+    UnregisterClassW(wc.lpszClassName, g_hInst);
+    delete rw;
+    return 0;
+}
+
 // ---------------- Settings dialog programmatic UI ----------------
 // IDs
-enum { CID_OK = 100, CID_CANCEL = 101, CID_EDIT_STARS = 110, CID_EDIT_SPEED = 111, CID_PREVIEW = 112, CID_BUTTON_COLOR = 113, CID_LABEL_COLOR=114 };
+enum { CID_OK = 100, CID_CANCEL = 101, CID_EDIT_STARS = 110, CID_EDIT_SPEED = 111, CID_PREVIEW = 112, CID_BUTTON_COLOR = 113, CID_LABEL_COLOR = 114 };
 
 // Create child controls on given window
 static void CreateSettingsControls(HWND dlg)
 {
-    CreateWindowExW(0, L"STATIC", L"Star count:", WS_CHILD | WS_VISIBLE | SS_LEFT, 10, 10, 80, 18, dlg, NULL, g_hInst, NULL);
-    CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", NULL, WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_LEFT, 100, 8, 80, 20, dlg, (HMENU)CID_EDIT_STARS, g_hInst, NULL);
-  
-    CreateWindowExW(0, L"STATIC", L"Speed:", WS_CHILD | WS_VISIBLE | SS_LEFT, 10, 40, 80, 18, dlg, NULL, g_hInst, NULL);
-    CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", NULL, WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_LEFT, 100, 38, 80, 20, dlg, (HMENU)CID_EDIT_SPEED, g_hInst, NULL);
-   
-    CreateWindowExW(0, L"BUTTON", L"Pick color", WS_CHILD | WS_VISIBLE, 200, 8, 80, 18, dlg, (HMENU)CID_BUTTON_COLOR, g_hInst, NULL);
-    CreateWindowExW(0, L"STATIC", L"     ",  WS_CHILD | WS_VISIBLE | SS_SIMPLE | SS_BLACKFRAME, 200, 38, 80, 18, dlg, (HMENU)CID_LABEL_COLOR, g_hInst, NULL);
-
-    CreateWindowExW(0, L"BUTTON", L"OK", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 80, 70, 80, 26, dlg, (HMENU)CID_OK, g_hInst, NULL);
-    CreateWindowExW(0, L"BUTTON", L"Cancel", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 168, 70, 80, 26, dlg, (HMENU)CID_CANCEL, g_hInst, NULL);  
+    HFONT hFont = CreateFontW(18, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
+    HWND hColorLabel = CreateWindowExW(0, L"STATIC", L"Star count:", WS_CHILD | WS_VISIBLE | SS_LEFT, 10, 10, 80, 18, dlg, NULL, g_hInst, NULL);
+    HWND hColorEdit = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", NULL, WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_LEFT, 100, 8, 80, 20, dlg, (HMENU)CID_EDIT_STARS, g_hInst, NULL);
+    HWND hSpeedLabel = CreateWindowExW(0, L"STATIC", L"Speed:", WS_CHILD | WS_VISIBLE | SS_LEFT, 10, 40, 80, 18, dlg, NULL, g_hInst, NULL);
+    HWND hSpeedEdit = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", NULL, WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_LEFT, 100, 38, 80, 20, dlg, (HMENU)CID_EDIT_SPEED, g_hInst, NULL);
+    HWND hColorButton = CreateWindowExW(0, L"BUTTON", L"Pick color", WS_CHILD | WS_VISIBLE, 200, 8, 80, 24, dlg, (HMENU)CID_BUTTON_COLOR, g_hInst, NULL);
+    CreateWindowExW(0, L"STATIC", L"     ",  WS_CHILD | WS_VISIBLE | SS_SIMPLE | SS_BLACKFRAME, 200, 38, 80, 26, dlg, (HMENU)CID_LABEL_COLOR, g_hInst, NULL);
+    HWND hOkButton = CreateWindowExW(0, L"BUTTON", L"OK", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 80, 70, 80, 24, dlg, (HMENU)CID_OK, g_hInst, NULL);
+    HWND hCancelButton = CreateWindowExW(0, L"BUTTON", L"Cancel", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 168, 70, 80, 24, dlg, (HMENU)CID_CANCEL, g_hInst, NULL);
+    SendMessageW(hColorLabel, WM_SETFONT, (WPARAM)hFont, TRUE);
+    SendMessageW(hColorEdit, WM_SETFONT, (WPARAM)hFont, TRUE);
+    SendMessageW(hSpeedLabel, WM_SETFONT, (WPARAM)hFont, TRUE);
+    SendMessageW(hSpeedEdit, WM_SETFONT, (WPARAM)hFont, TRUE);
+    SendMessageW(hColorButton, WM_SETFONT, (WPARAM)hFont, TRUE);
+    SendMessageW(hOkButton, WM_SETFONT, (WPARAM)hFont, TRUE); 
+    SendMessageW(hCancelButton, WM_SETFONT, (WPARAM)hFont, TRUE);
 }
 
 // Settings window proc handles control actions and closes window
@@ -512,9 +572,8 @@ LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPar
             cc.lpCustColors = (LPDWORD)acrCustClr;
             cc.rgbResult = g_CurrentStarColor; // initial color
             cc.Flags = CC_FULLOPEN | CC_RGBINIT;
-           
-            if (ChooseColor(&cc)) 
-            {
+
+            if (ChooseColor(&cc)) {
                 g_CurrentStarColor = cc.rgbResult;
                 if (g_hBrushColor) DeleteObject(g_hBrushColor);
                 g_hBrushColor = CreateSolidBrush(g_CurrentStarColor);
@@ -581,10 +640,6 @@ LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPar
                 SetFocus(parent);
                 AttachThreadInput(tidThis, tidParent, FALSE);
             }
-
-            // Ensure Z-order and visibility
-            SetWindowPos(parent, HWND_TOP, 0, 0, 0, 0,
-                SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
             
             if (g_hBrushColor)
             {
@@ -645,61 +700,6 @@ static int ShowSettingsModalPopup(HWND parent)
         DispatchMessageW(&msg);
     }
     if (parent && IsWindow(parent)) EnableWindow(wParent, TRUE);
-    return 0;
-}
-
-// Simple preview runner
-static int RunPreview(HWND parent)
-{
-    if (!IsWindow(parent)) return 0;
-    WNDCLASSW wc = {};
-    wc.lpfnWndProc = PreviewProc;
-    wc.hInstance = g_hInst;
-    wc.lpszClassName = L"MyStarPre";
-    RegisterClassW(&wc);
-
-    RECT pr; 
-    GetClientRect(parent, &pr);
-    HWND child = CreateWindowExW(0, wc.lpszClassName, L"", WS_CHILD | WS_VISIBLE, 0, 0, pr.right - pr.left, pr.bottom - pr.top, parent, NULL, g_hInst, NULL);
-    if (!child)
-    {
-        UnregisterClassW(wc.lpszClassName, g_hInst);
-        return 0;
-    }
-
-    RenderWindow* rw = new RenderWindow();
-    rw->hwnd = child; 
-    rw->isPreview = true; 
-    rw->rc = pr;
-    std::random_device rd; 
-    rw->rng.seed(rd());
-    CreateBackbuffer(rw);
-    InitStars(rw);
-    QueryPerformanceFrequency(&g_PerfFreq);
-    LARGE_INTEGER last;
-    QueryPerformanceCounter(&last);
-    double total = 0.0; 
-    MSG msg;
-    while (IsWindow(child)) 
-    {
-        while (PeekMessageW(&msg, NULL, 0, 0, PM_REMOVE))
-        {
-            if (msg.message == WM_QUIT) { DestroyWindow(child); break; }
-            TranslateMessage(&msg); 
-            DispatchMessageW(&msg);
-        }
-        LARGE_INTEGER now;
-        QueryPerformanceCounter(&now);
-        double dt = double(now.QuadPart - last.QuadPart) / double(g_PerfFreq.QuadPart);
-        last = now; total += dt;
-        RenderFrame(rw, (float)dt, (float)total);
-        Sleep(15);
-    }
-    DestroyBackbuffer(rw);
-    ShowCursor(TRUE);
-    DestroyWindow(child);
-    UnregisterClassW(wc.lpszClassName, g_hInst);
-    delete rw;
     return 0;
 }
 
