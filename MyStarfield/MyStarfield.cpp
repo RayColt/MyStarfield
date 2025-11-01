@@ -677,7 +677,7 @@ static int ShowSettingsModalPopup(HWND parent)
     if (!IsWindow(parent)) return 0;
     EnsureSettingsClassRegistered();
     HWND wParent = GetParent(parent);
-    if (parent && IsWindow(parent)) EnableWindow(wParent, FALSE);
+    if (wParent && IsWindow(wParent)) EnableWindow(wParent, FALSE);
 
     int w = 360, h = 144;
     int sw = GetSystemMetrics(SM_CXSCREEN), sh = GetSystemMetrics(SM_CYSCREEN);
@@ -686,7 +686,7 @@ static int ShowSettingsModalPopup(HWND parent)
     HWND dlg = CreateWindowExW(WS_EX_DLGMODALFRAME, L"MyStarfieldSettingsClass", L"MyStarfield Settings", WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU, x, y, w, h, parent, NULL, g_hInst, NULL);
     if (!dlg) 
     {
-        if (parent && IsWindow(parent)) EnableWindow(wParent, TRUE);
+        if (wParent && IsWindow(wParent)) EnableWindow(wParent, TRUE);
         return -1;
     }
 
@@ -700,7 +700,7 @@ static int ShowSettingsModalPopup(HWND parent)
         TranslateMessage(&msg);
         DispatchMessageW(&msg);
     }
-    if (parent && IsWindow(parent)) EnableWindow(wParent, TRUE);
+    if (wParent && IsWindow(wParent)) EnableWindow(wParent, TRUE);
     return 0;
 }
 
