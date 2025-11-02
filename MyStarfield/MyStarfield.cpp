@@ -622,8 +622,11 @@ LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPar
             cc.rgbResult = g_CurrentStarColor; // initial color
             cc.Flags = CC_FULLOPEN | CC_RGBINIT;
 
-            if (ChooseColor(&cc)) {
+            if (ChooseColor(&cc)) 
+            {
+                // user picked a color — cc.rgbResult now contains the selection
                 g_CurrentStarColor = cc.rgbResult;
+                BYTE r = GetRValue(g_CurrentStarColor), g = GetGValue(g_CurrentStarColor), b = GetBValue(g_CurrentStarColor);
                 // save back the updated custom colors
                 vector<COLORREF> toSave(16);
                 for (int i = 0; i < 16; ++i)
