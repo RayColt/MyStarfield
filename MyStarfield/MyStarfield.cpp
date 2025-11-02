@@ -323,7 +323,7 @@ static void RenderFrame(RenderWindow* rw, float dt, float totalTime)
             (int)floorf(px - psz), (int)floorf(py - psz),
             (int)ceilf(px + psz + 1), (int)ceilf(py + psz + 1));
         SelectObject(rw->backHdc, oldBrush);
-*/
+        */
     }
 
     // cleanup
@@ -665,7 +665,8 @@ LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPar
         HDC hdcStatic = (HDC)wParam;
         HWND hStatic = (HWND)lParam;
 
-        if (GetDlgCtrlID(hStatic) == CID_LABEL_COLOR) {
+        if (GetDlgCtrlID(hStatic) == CID_LABEL_COLOR) 
+        {
             SetBkMode(hdcStatic, OPAQUE);
             SetBkColor(hdcStatic, g_CurrentStarColor);
             return (INT_PTR)g_hBrushColor;
