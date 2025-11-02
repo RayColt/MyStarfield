@@ -58,35 +58,32 @@ static void SaveSettings()
 	SetRegDWORD(REG_COLOR, (DWORD)g_CurrentStarColor);
 }
 // Pick Color Dialog custom colors load/save
-bool LoadCustomColors(vector<COLORREF>& colors) 
+static void LoadCustomColors(vector<COLORREF>& colors) 
 {
     colors.assign(16, RGB(255, 255, 255));
     HKEY hKey;
-    if (RegOpenKeyExW(HKEY_CURRENT_USER, REG_KEY, 0, KEY_READ, &hKey) != ERROR_SUCCESS)
-        return false;
-
-    DWORD type = 0, size = 0;
-    if (RegQueryValueExW(hKey, REG_CCOLORS, nullptr, &type, nullptr, &size) == ERROR_SUCCESS &&
-        type == REG_BINARY && size == sizeof(COLORREF) * 16)
+    if (RegOpenKeyExW(HKEY_CURRENT_USER, REG_KEY, 0, KEY_READ, &hKey) == ERROR_SUCCESS)
     {
-        RegQueryValueExW(hKey, REG_CCOLORS, nullptr, &type, reinterpret_cast<LPBYTE>(colors.data()), &size);
-        RegCloseKey(hKey);
-        return true;
+        DWORD type = 0, size = 0;
+        if (RegQueryValueExW(hKey, REG_CCOLORS, nullptr, &type, nullptr, &size) == ERROR_SUCCESS &&
+            type == REG_BINARY && size == sizeof(COLORREF) * 16)
+        {
+            RegQueryValueExW(hKey, REG_CCOLORS, nullptr, &type, reinterpret_cast<LPBYTE>(colors.data()), &size);
+            RegCloseKey(hKey);
+        }
     }
     RegCloseKey(hKey);
-    return false;
 }
-bool SaveCustomColors(const vector<COLORREF>& colors)
+static void SaveCustomColors(const vector<COLORREF>& colors)
 {
     HKEY hKey;
-    if (RegCreateKeyExW(HKEY_CURRENT_USER, REG_KEY, 0, nullptr, 0, KEY_WRITE, nullptr, &hKey, nullptr) != ERROR_SUCCESS)
-        return false;
-
-    auto ok = RegSetValueExW(hKey, REG_CCOLORS, 0, REG_BINARY,
-        reinterpret_cast<const BYTE*>(colors.data()),
+    if (RegCreateKeyExW(HKEY_CURRENT_USER, REG_KEY, 0, nullptr, 0, KEY_WRITE, nullptr, &hKey, nullptr) == ERROR_SUCCESS)
+    {
+        RegSetValueExW(hKey, REG_CCOLORS, 0, REG_BINARY, reinterpret_cast<const BYTE*>(colors.data()),
         static_cast<DWORD>(sizeof(COLORREF) * colors.size())) == ERROR_SUCCESS;
+        RegCloseKey(hKey);
+    }
     RegCloseKey(hKey);
-    return ok;
 }
 
 // Star model
