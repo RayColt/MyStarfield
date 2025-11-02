@@ -1,5 +1,7 @@
 ﻿// MyStarfield.cpp
-// Build as Windows GUI (/SUBSYSTEM:WINDOWS)
+// Build as Windows GUI with Console Entry point with:
+// - Linker/SubSystem/Windows (/SUBSYSTEM:WINDOWS)
+// - C/C++/Preprocessor/Preprocessor Definitions/(WIN32;DEBUG;_CONSOLE;)
 // Copy generated MyStarfield.scr in Debug directory to C:\Windows\System32
 #include <windows.h>
 #include <random>
