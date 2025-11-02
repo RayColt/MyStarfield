@@ -12,6 +12,8 @@ static LPCWSTR REG_KEY = L"Software\\MyStarfield";
 static LPCWSTR REG_STARS = L"StarCount";
 static LPCWSTR REG_SPEED = L"Speed";
 static LPCWSTR REG_COLOR = L"Color";
+static LPCWSTR REG_CCOLORS = L"Custom Colors";
+static COLORREF g_CustomColors[16];
 
 // Defaults
 static int g_StarCount = 667;
@@ -54,6 +56,37 @@ static void SaveSettings()
     SetRegDWORD(REG_STARS, (DWORD)g_StarCount);
     SetRegDWORD(REG_SPEED, (DWORD)g_Speed);
 	SetRegDWORD(REG_COLOR, (DWORD)g_CurrentStarColor);
+}
+// Pick Color Dialog custom colors load/save
+bool LoadCustomColors(vector<COLORREF>& colors) 
+{
+    colors.assign(16, RGB(255, 255, 255));
+    HKEY hKey;
+    if (RegOpenKeyExW(HKEY_CURRENT_USER, REG_KEY, 0, KEY_READ, &hKey) != ERROR_SUCCESS)
+        return false;
+
+    DWORD type = 0, size = 0;
+    if (RegQueryValueExW(hKey, REG_CCOLORS, nullptr, &type, nullptr, &size) == ERROR_SUCCESS &&
+        type == REG_BINARY && size == sizeof(COLORREF) * 16)
+    {
+        RegQueryValueExW(hKey, REG_CCOLORS, nullptr, &type, reinterpret_cast<LPBYTE>(colors.data()), &size);
+        RegCloseKey(hKey);
+        return true;
+    }
+    RegCloseKey(hKey);
+    return false;
+}
+bool SaveCustomColors(const vector<COLORREF>& colors)
+{
+    HKEY hKey;
+    if (RegCreateKeyExW(HKEY_CURRENT_USER, REG_KEY, 0, nullptr, 0, KEY_WRITE, nullptr, &hKey, nullptr) != ERROR_SUCCESS)
+        return false;
+
+    auto ok = RegSetValueExW(hKey, REG_CCOLORS, 0, REG_BINARY,
+        reinterpret_cast<const BYTE*>(colors.data()),
+        static_cast<DWORD>(sizeof(COLORREF) * colors.size())) == ERROR_SUCCESS;
+    RegCloseKey(hKey);
+    return ok;
 }
 
 // Star model
@@ -578,17 +611,27 @@ LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPar
         int id = LOWORD(wParam);
         if (id == CID_BUTTON_COLOR)
         {
+            vector<COLORREF> persisted;
+            LoadCustomColors(persisted);
+            for (int i = 0; i < 16; ++i) g_CustomColors[i] = persisted[i];
+
             CHOOSECOLOR cc = {};
-            static COLORREF acrCustClr[16]; // custom colors
             ZeroMemory(&cc, sizeof(cc));
             cc.lStructSize = sizeof(cc);
             cc.hwndOwner = hWnd; // parent window handle
-            cc.lpCustColors = (LPDWORD)acrCustClr;
+            cc.lpCustColors = g_CustomColors;
             cc.rgbResult = g_CurrentStarColor; // initial color
             cc.Flags = CC_FULLOPEN | CC_RGBINIT;
 
             if (ChooseColor(&cc)) {
                 g_CurrentStarColor = cc.rgbResult;
+                // save back the updated custom colors
+                vector<COLORREF> toSave(16);
+                for (int i = 0; i < 16; ++i)
+                {
+                    toSave[i] = g_CustomColors[i];
+                }
+				SaveCustomColors(toSave);
                 if (g_hBrushColor) DeleteObject(g_hBrushColor);
                 g_hBrushColor = CreateSolidBrush(g_CurrentStarColor);
                 InvalidateRect(hColorLabel, NULL, TRUE);
@@ -642,7 +685,7 @@ LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPar
             SetForegroundWindow(parent);
             SetFocus(parent);
 
-            // If SetForegroundWindow did not take effect, use AttachThreadInput fallback
+            /* REMOVE EVT / Attempt 2 If SetForegroundWindow did not take effect, use AttachThreadInput fallback
             DWORD tidParent = GetWindowThreadProcessId(parent, NULL);
             DWORD tidThis = GetCurrentThreadId();
             if (tidParent != tidThis) 
@@ -654,7 +697,10 @@ LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPar
                 SetFocus(parent);
                 AttachThreadInput(tidThis, tidParent, FALSE);
             }
-            
+
+			// Attempt 3 to Ensure Z-order of Parent Settings Dialog
+            SetWindowPos(parent, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
+            */
             if (g_hBrushColor)
             {
                 DeleteObject(g_hBrushColor);
