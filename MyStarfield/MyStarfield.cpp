@@ -5,6 +5,8 @@
 #include <random>
 #include <string>
 
+using namespace std;
+
 // ---- Config / registry keys
 static LPCWSTR REG_KEY = L"Software\\MyStarfield";
 static LPCWSTR REG_STARS = L"StarCount";
@@ -71,14 +73,14 @@ struct RenderWindow
     HBITMAP backBmp = NULL;
     HBITMAP oldBackBmp = NULL;
     RECT rc = {};
-    std::vector<Star> stars;
-    std::mt19937 rng;
+    vector<Star> stars;
+    mt19937 rng;
     bool isPreview = false;
 };
 
 // Globals
 static HINSTANCE g_hInst = NULL;
-static std::vector<RenderWindow*> g_Windows;
+static vector<RenderWindow*> g_Windows;
 static bool g_Running = true;
 
 // Input filtering
@@ -95,20 +97,20 @@ static void ParseArgs(int argc, wchar_t** argv, wchar_t& modeOut, HWND& hwndOut)
     modeOut = 0; 
     hwndOut = NULL;
     if (argc <= 1) return;
-    std::wstring a1 = argv[1];
+    wstring a1 = argv[1];
     if (a1.size() >= 2 && (a1[0] == L'/' || a1[0] == L'-'))
     {
         wchar_t c = towlower(a1[1]);
         modeOut = c;
         size_t colon = a1.find(L':');
-        if (colon != std::wstring::npos)
+        if (colon != wstring::npos)
         {
-            std::wstring num = a1.substr(colon + 1);
+            wstring num = a1.substr(colon + 1);
             if (!num.empty()) hwndOut = (HWND)_wcstoui64(num.c_str(), nullptr, 0);
         }
         else if (argc >= 3)
         {
-            std::wstring a2 = argv[2];
+            wstring a2 = argv[2];
             bool numeric = !a2.empty();
             for (wchar_t ch : a2) if (!iswdigit(ch)) { numeric = false; break; }
             if (numeric) hwndOut = (HWND)_wcstoui64(a2.c_str(), nullptr, 0);
@@ -179,7 +181,7 @@ static void InitStars(RenderWindow* rw)
     rw->stars.clear();
     rw->stars.resize(g_StarCount);
     int jitterMax = max(1, g_Speed / 2 + 1);
-    std::uniform_real_distribution<float> ud01(0.0f, 1.0f);
+    uniform_real_distribution<float> ud01(0.0f, 1.0f);
 
     for (int i = 0; i < g_StarCount; ++i)
     {
@@ -226,7 +228,7 @@ static void RenderFrame(RenderWindow* rw, float dt, float totalTime)
         if (s.z <= Z_MIN)
         {
             // respawn centered and far
-            std::uniform_real_distribution<float> ud01(0.0f, 1.0f);
+            uniform_real_distribution<float> ud01(0.0f, 1.0f);
             float fx = ud01(rw->rng), fy = ud01(rw->rng), fz = ud01(rw->rng);
             s.x = (fx - 0.5f) * (float)w * 2.0f;
             s.y = (fy - 0.5f) * (float)h * 2.0f;
@@ -285,6 +287,13 @@ static void RenderFrame(RenderWindow* rw, float dt, float totalTime)
                 SelectObject(rw->backHdc, oldBrush);
             }
         }
+        /* Old if (brushes[bucket]){}/Ellipse part, for >= 2px stars
+        HBRUSH oldBrush = (HBRUSH)SelectObject(rw->backHdc, brushes[bucket]);
+        Ellipse(rw->backHdc,
+            (int)floorf(px - psz), (int)floorf(py - psz),
+            (int)ceilf(px + psz + 1), (int)ceilf(py + psz + 1));
+        SelectObject(rw->backHdc, oldBrush);
+*/
     }
 
     // cleanup
@@ -391,7 +400,7 @@ static BOOL CALLBACK MonEnumProc(HMONITOR hMon, HDC, LPRECT, LPARAM)
     RECT r = mi.rcMonitor;
     RenderWindow* rw = new RenderWindow();
     rw->rc = r;
-    std::random_device rd;
+    random_device rd;
     rw->rng.seed(rd());
     static bool reg = false;
     if (!reg)
@@ -488,7 +497,7 @@ static int RunPreview(HWND parent)
     rw->hwnd = child;
     rw->isPreview = true;
     rw->rc = pr;
-    std::random_device rd;
+    random_device rd;
     rw->rng.seed(rd());
     CreateBackbuffer(rw);
     InitStars(rw);
@@ -527,8 +536,8 @@ enum { CID_OK = 100, CID_CANCEL = 101, CID_EDIT_STARS = 110, CID_EDIT_SPEED = 11
 // Create child controls on given window
 static void CreateSettingsControls(HWND dlg)
 {
-    std::wstring mst = L"Stars (max " + std::to_wstring(g_MaxStars) + L"):";
-    std::wstring msp = L"Speed (max " + std::to_wstring(g_MaxSpeed) + L"):";
+    wstring mst = L"Stars (max " + to_wstring(g_MaxStars) + L"):";
+    wstring msp = L"Speed (max " + to_wstring(g_MaxSpeed) + L"):";
     HFONT hFont = CreateFontW(18, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
     
     HWND hColorLabel = CreateWindowExW(0, L"STATIC", mst.c_str(), WS_CHILD | WS_VISIBLE | SS_LEFT, 10, 10, 120, 18, dlg, NULL, g_hInst, NULL);
@@ -591,11 +600,11 @@ LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPar
             BOOL ok;
             int stars = GetDlgItemInt(hWnd, CID_EDIT_STARS, &ok, FALSE);
             if (!ok) stars = g_StarCount;
-            stars = (int)std::fmax(1, std::fmin(g_MaxStars, stars));
+            stars = (int)fmax(1, fmin(g_MaxStars, stars));
 
             int speed = GetDlgItemInt(hWnd, CID_EDIT_SPEED, &ok, FALSE);
             if (!ok) speed = g_Speed;
-            speed = (int)std::fmax(1, std::fmin(g_MaxSpeed, speed));
+            speed = (int)fmax(1, fmin(g_MaxSpeed, speed));
 
             g_StarCount = stars;
             g_Speed = speed;
