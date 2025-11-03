@@ -593,7 +593,7 @@ static void CreateSettingsControls(HWND dlg)
 // Settings window proc handles control actions and closes window
 LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
-    HWND parent = GetParent(hWnd);
+    HWND parent = hWnd; // GetParent(hWnd);
     HWND hColorLabel = GetDlgItem(hWnd, CID_LABEL_COLOR);
     g_hBrushColor = CreateSolidBrush(g_CurrentStarColor);
     switch (msg)
@@ -626,6 +626,7 @@ LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPar
             {
                 // user picked a color — cc.rgbResult now contains the selection
                 g_CurrentStarColor = cc.rgbResult;
+				// Macro's to update RGB components inside the Colorpicker
                 BYTE r = GetRValue(g_CurrentStarColor), g = GetGValue(g_CurrentStarColor), b = GetBValue(g_CurrentStarColor);
                 // save back the updated custom colors
                 vector<COLORREF> toSave(16);
