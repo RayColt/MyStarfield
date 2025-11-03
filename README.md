@@ -1,8 +1,8 @@
 # MyStarfield
 A be nice to AI ;-), working C++ Old Skool Starfield screensaver for Windows 11.<br>
 
-Do not forget to tweak InitStars() to your own convenience<br>
-and to run and compile the project in DEBUG/x86 mode!!<br>
+Two MyStarfields, one with basic graphics from the Win32 API the other somewhat more advanced from the S2D1 API (Direct2D API)<br><br>
+RUN and compile the project in DEBUG/x86 mode!!<br>
 
 <img src=https://github.com/RayColt/MyStarfield/blob/master/.gitfiles/x86.jpg>
 
