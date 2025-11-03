@@ -328,7 +328,8 @@ LRESULT CALLBACK PreviewProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
 }
 
 // Enum monitors -> create fullscreen windows
-static BOOL CALLBACK MonEnumProc(HMONITOR hMon, HDC, LPRECT, LPARAM) {
+static BOOL CALLBACK MonEnumProc(HMONITOR hMon, HDC, LPRECT, LPARAM) 
+{
     MONITORINFOEXW mi; mi.cbSize = sizeof(mi);
     if (!GetMonitorInfoW(hMon, &mi)) return TRUE;
     RECT r = mi.rcMonitor;
@@ -336,7 +337,8 @@ static BOOL CALLBACK MonEnumProc(HMONITOR hMon, HDC, LPRECT, LPARAM) {
     rw->rc = r; random_device rd; rw->rng.seed(rd());
     D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, &rw->factory);
     static bool reg = false;
-    if (!reg) {
+    if (!reg) 
+    {
         WNDCLASSW wc = {}; wc.lpfnWndProc = FullWndProc; wc.hInstance = g_hInst; wc.lpszClassName = L"MyStarfieldFullClass"; wc.hCursor = LoadCursor(NULL, IDC_ARROW);
         RegisterClassW(&wc); reg = true;
     }
@@ -357,7 +359,8 @@ static void RunFull()
     POINT p; GetCursorPos(&p); g_StartMouse = p; g_StartMouseInit = true;
     LARGE_INTEGER last; QueryPerformanceCounter(&last);
     double total = 0.0; MSG msg;
-    while (g_Running) {
+    while (g_Running) 
+    {
         while (PeekMessageW(&msg, NULL, 0, 0, PM_REMOVE))
         { 
             if (msg.message == WM_QUIT) 
