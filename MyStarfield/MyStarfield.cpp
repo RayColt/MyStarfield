@@ -729,6 +729,7 @@ static void EnsureSettingsClassRegistered()
     wc.lpszClassName = L"MyStarfieldSettingsClass";
     wc.hCursor = LoadCursor(NULL, IDC_ARROW);
     wc.hbrBackground = (HBRUSH)(COLOR_BTNFACE + 1);
+	wc.style = BS_PUSHLIKE;
     RegisterClassW(&wc);
     reg = true;
 }
