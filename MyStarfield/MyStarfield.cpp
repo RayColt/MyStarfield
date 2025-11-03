@@ -593,7 +593,10 @@ static void CreateSettingsControls(HWND dlg)
 // Settings window proc handles control actions and closes window
 LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
-    HWND parent = hWnd; // GetParent(hWnd);
+    // retrieve the window we disabled when the dialog was created
+    HWND owner = (HWND)GetWindowLongPtrW(hWnd, GWLP_USERDATA);
+    if (!owner) owner = GetParent(hWnd); // fallback for safety
+
     HWND hColorLabel = GetDlgItem(hWnd, CID_LABEL_COLOR);
     g_hBrushColor = CreateSolidBrush(g_CurrentStarColor);
     switch (msg)
@@ -681,29 +684,16 @@ LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPar
     }
     case WM_DESTROY:
     {
-        if (parent && IsWindow(parent)) 
+        if (owner && IsWindow(owner))
         {
-            EnableWindow(parent, TRUE);
-            BringWindowToTop(parent);
-            SetActiveWindow(parent);
-            SetForegroundWindow(parent);
-            SetFocus(parent);
+            EnableWindow(owner, TRUE);
+            BringWindowToTop(owner);
+            SetActiveWindow(owner);
+            SetForegroundWindow(owner);
+            SetFocus(owner);
 
-            // Attempt 2 4 if SetForegroundWindow did not take effect, use AttachThreadInput fallback
-            DWORD tidParent = GetWindowThreadProcessId(parent, NULL);
-            DWORD tidThis = GetCurrentThreadId();
-            if (tidParent != tidThis) 
-            {
-                AttachThreadInput(tidThis, tidParent, TRUE);
-                BringWindowToTop(parent);
-                SetForegroundWindow(parent);
-                SetActiveWindow(parent);
-                SetFocus(parent);
-                AttachThreadInput(tidThis, tidParent, FALSE);
-            }
-
-			// Attempt 3 2 Ensure Z-order of Parent Settings Dialog
-            SetWindowPos(parent, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
+			// Ensure Z-order of Parent Settings Dialog
+            SetWindowPos(owner, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
             
             if (g_hBrushColor)
             {
@@ -747,13 +737,16 @@ static int ShowSettingsModalPopup(HWND parent)
     int sw = GetSystemMetrics(SM_CXSCREEN), sh = GetSystemMetrics(SM_CYSCREEN);
     int x = (sw - w) / 2, y = (sh - h) / 2;
 
+    // In ShowSettingsModalPopup, after disabling wParent store it on the dialog
     HWND dlg = CreateWindowExW(WS_EX_DLGMODALFRAME, L"MyStarfieldSettingsClass", L"MyStarfield Settings", WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU, x, y, w, h, parent, NULL, g_hInst, NULL);
-    if (!dlg) 
+    if (!dlg)
     {
         if (wParent && IsWindow(wParent)) EnableWindow(wParent, TRUE);
         return -1;
     }
 
+    // remember which window we disabled so SettingsWndProc can restore it later
+    SetWindowLongPtrW(dlg, GWLP_USERDATA, (LONG_PTR)wParent);
     ShowWindow(dlg, SW_SHOW);
     UpdateWindow(dlg);
 
