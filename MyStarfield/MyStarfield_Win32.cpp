@@ -16,7 +16,7 @@
 using namespace std;
 
 // ---- Config / registry keys
-static LPCWSTR REG_KEY = L"Software\\MyStarfield";
+static LPCWSTR REG_KEY = L"Software\\MyStarfieldW32";
 static LPCWSTR REG_STARS = L"StarCount";
 static LPCWSTR REG_SPEED = L"Speed";
 static LPCWSTR REG_COLOR = L"Color";

@@ -24,10 +24,10 @@ T clamp(T val, T minVal, T maxVal)
 }
 
 // ---- Config / registry keys
-static LPCWSTR REG_KEY = L"Software\\MyStarfieldScreensaver";
+static LPCWSTR REG_KEY = L"Software\\MyStarfieldD2D1";
 static LPCWSTR REG_STARS = L"StarCount";
 static LPCWSTR REG_SPEED = L"SpeedPercent";
-static LPCWSTR REG_TWINKLE = L"TwinklePercent";
+static LPCWSTR REG_TWINKLE = L"TwinklePercent";// TODO: implement twinkle setting in UI
 static LPCWSTR REG_COLOR = L"Color";
 static LPCWSTR REG_CCOLORS = L"Custom Colors";
 static COLORREF g_CustomColors[16];
