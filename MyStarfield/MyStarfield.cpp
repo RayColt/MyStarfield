@@ -688,7 +688,7 @@ LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPar
             SetForegroundWindow(parent);
             SetFocus(parent);
 
-            /* REMOVE EVT / Attempt 2 If SetForegroundWindow did not take effect, use AttachThreadInput fallback
+            // Attempt 2 4 if SetForegroundWindow did not take effect, use AttachThreadInput fallback
             DWORD tidParent = GetWindowThreadProcessId(parent, NULL);
             DWORD tidThis = GetCurrentThreadId();
             if (tidParent != tidThis) 
@@ -703,7 +703,7 @@ LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPar
 
 			// Attempt 3 to Ensure Z-order of Parent Settings Dialog
             SetWindowPos(parent, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
-            */
+            
             if (g_hBrushColor)
             {
                 DeleteObject(g_hBrushColor);
