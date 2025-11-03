@@ -701,7 +701,7 @@ LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPar
                 AttachThreadInput(tidThis, tidParent, FALSE);
             }
 
-			// Attempt 3 to Ensure Z-order of Parent Settings Dialog
+			// Attempt 3 2 Ensure Z-order of Parent Settings Dialog
             SetWindowPos(parent, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
             
             if (g_hBrushColor)
