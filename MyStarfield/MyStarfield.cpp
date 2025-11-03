@@ -593,7 +593,7 @@ static void CreateSettingsControls(HWND dlg)
 // Settings window proc handles control actions and closes window
 LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
-    // retrieve the window we disabled when the dialog was created
+    // retrieve the disabled window when the dialog was created
     HWND owner = (HWND)GetWindowLongPtrW(hWnd, GWLP_USERDATA);
     if (!owner) owner = GetParent(hWnd); // fallback for safety
 
@@ -745,7 +745,7 @@ static int ShowSettingsModalPopup(HWND parent)
         return -1;
     }
 
-    // remember which window we disabled so SettingsWndProc can restore it later
+    // remember which window is disabled so SettingsWndProc can restore it later
     SetWindowLongPtrW(dlg, GWLP_USERDATA, (LONG_PTR)wParent);
     ShowWindow(dlg, SW_SHOW);
     UpdateWindow(dlg);
