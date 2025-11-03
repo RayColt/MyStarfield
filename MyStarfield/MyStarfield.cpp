@@ -3,6 +3,9 @@
 // - Linker/SubSystem/Windows/(/SUBSYSTEM:WINDOWS)
 // - C/C++/Preprocessor/Preprocessor Definitions/(WIN32;DEBUG;_CONSOLE;)
 // Copy generated MyStarfield.scr in Debug directory to C:\Windows\System32
+//
+// If you experience some latencies lower down the amount of stars, 
+// use settings like g_MaxStars=200 and g_MaxSpeed=20, only the Win32 API is used.
 #include <windows.h>
 #include <random>
 #include <string>
@@ -18,8 +21,8 @@ static LPCWSTR REG_CCOLORS = L"Custom Colors";
 static COLORREF g_CustomColors[16];
 
 // Defaults
-static int g_StarCount = 667;
-static int g_Speed = 9;
+static int g_StarCount = 200;
+static int g_Speed = 10;
 static int g_MaxStars = 1000;
 static int g_MaxSpeed = 250;
 static COLORREF g_CurrentStarColor = RGB(255, 255, 255);// Default Star Color!
