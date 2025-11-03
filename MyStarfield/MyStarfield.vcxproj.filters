@@ -30,7 +30,7 @@
     </ResourceCompile>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="MyStarfield_Win32.cpp">
+    <ClCompile Include="MyStarfieldW32.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>

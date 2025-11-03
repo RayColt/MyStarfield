@@ -28,7 +28,7 @@
     <ResourceCompile Include="MyStarfield.rc" />
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="MyStarfield_Win32.cpp" />
+    <ClCompile Include="MyStarfieldW32.cpp" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <VCProjectVersion>17.0</VCProjectVersion>
