@@ -1,4 +1,4 @@
-﻿/*                         !!!!!!!!!!!!!! IN DEVELOPMENT    !!!!!!!
+﻿/*
 * MyStarfield.cpp
 * Build as Windows GUI with Console Entry point with:
 * - Linker/SubSystem/Windows/(/SUBSYSTEM:WINDOWS)
@@ -15,10 +15,11 @@
 #include <random>
 
 using namespace std;
-
 #pragma comment(lib, "d2d1.lib")
+
 template <typename T>
-T clamp(T val, T minVal, T maxVal) {
+T clamp(T val, T minVal, T maxVal) 
+{
     return (val < minVal) ? minVal : (val > maxVal) ? maxVal : val;
 }
 
@@ -27,9 +28,6 @@ static LPCWSTR REG_KEY = L"Software\\MyStarfieldScreensaver";
 static LPCWSTR REG_STARS = L"StarCount";
 static LPCWSTR REG_SPEED = L"SpeedPercent";
 static LPCWSTR REG_TWINKLE = L"TwinklePercent";
-static LPCWSTR REG_COLOR_R = L"ColorR";
-static LPCWSTR REG_COLOR_G = L"ColorG";
-static LPCWSTR REG_COLOR_B = L"ColorB";
 static LPCWSTR REG_COLOR = L"Color";
 static LPCWSTR REG_CCOLORS = L"Custom Colors";
 static COLORREF g_CustomColors[16];
@@ -40,7 +38,6 @@ static int g_Speed = 60;
 static int g_MaxStars = 1000;
 static int g_MaxSpeed = 250;
 static int g_TwinklePercent = 30;
-static COLORREF g_Color = RGB(255, 255, 240);
 static float g_StarSizeMultiplier = 0.25f;
 static float g_StarBase = 1.0f;   // base numerator
 static float g_StarMin = 0.5f;
@@ -221,21 +218,27 @@ static void RenderFrame(RenderWindow* rw, float dt, float totalTime)
         float py = (s.y - cy) / s.z + cy;
         //float psz = 1.0f / s.z; if (psz < 1.0f) psz = 1.0f;
         float psz = (g_StarBase / s.z) * (0.6f + 0.8f * s.base) * g_StarSizeMultiplier;
-        psz = clamp(psz, g_StarMin, g_StarMax);
+        psz = std::clamp(psz, g_StarMin, g_StarMax);
         FLOAT dpiX = 96.0f, dpiY = 96.0f;
         rw->rt->GetDpi(&dpiX, &dpiY);
         float dpiScale = dpiX / 96.0f;
         psz *= dpiScale;
         float tw = s.base + (sinf(s.phase + (float)totalTime * 5.0f) * 0.5f + 0.5f) * twinkle;
-        float rr = GetRValue(g_Color) / 255.0f * tw;
-        float gg = GetGValue(g_Color) / 255.0f * tw;
-        float bb = GetBValue(g_Color) / 255.0f * tw;
+        float rr = GetRValue(g_CurrentStarColor) / 255.0f * tw;
+        float gg = GetGValue(g_CurrentStarColor) / 255.0f * tw;
+        float bb = GetBValue(g_CurrentStarColor) / 255.0f * tw;
         rw->brush->SetColor(D2D1::ColorF(rr, gg, bb, 1.0f));
         D2D1_ELLIPSE ell = D2D1::Ellipse(D2D1::Point2F(px, py), psz, psz);
         rw->rt->FillEllipse(ell, rw->brush);
     }
     HRESULT hr = rw->rt->EndDraw();
-    if (hr == D2DERR_RECREATE_TARGET) { if (rw->rt) { rw->rt->Release(); rw->rt = nullptr; } CreateRT(rw); }
+    if (hr == D2DERR_RECREATE_TARGET) 
+    { 
+        if (rw->rt) 
+        { rw->rt->Release(); 
+        rw->rt = nullptr; } 
+        CreateRT(rw); 
+    }
 }
 
 // ---- Foreground check and window procs
