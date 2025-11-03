@@ -593,7 +593,7 @@ static void CreateSettingsControls(HWND dlg)
 // Settings window proc handles control actions and closes window
 LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
-    HWND parent = hWnd; // GetParent(hWnd);
+    HWND parent = GetParent(hWnd);
     HWND hColorLabel = GetDlgItem(hWnd, CID_LABEL_COLOR);
     g_hBrushColor = CreateSolidBrush(g_CurrentStarColor);
     switch (msg)
