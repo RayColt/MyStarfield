@@ -21,6 +21,15 @@
   <ItemGroup>
     <ClCompile Include="MyStarfield.cpp" />
   </ItemGroup>
+  <ItemGroup>
+    <Image Include="MyStarfield.ico" />
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="resource.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="MyStarfield.rc" />
+  </ItemGroup>
   <PropertyGroup Label="Globals">
     <VCProjectVersion>17.0</VCProjectVersion>
     <Keyword>Win32Proj</Keyword>
