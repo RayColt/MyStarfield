@@ -19,7 +19,7 @@
     </ProjectConfiguration>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="MyStarfield.cpp" />
+    <ClCompile Include="MyStarfield_Win32.cpp" />
   </ItemGroup>
   <ItemGroup>
     <Image Include="MyStarfield.ico" />

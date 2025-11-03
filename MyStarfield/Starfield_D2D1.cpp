@@ -1,0 +1,677 @@
+﻿/*                         !!!!!!!!!!!!!! IN DEVELOPMENT    !!!!!!!
+* MyStarfield.cpp
+* Build as Windows GUI with Console Entry point with:
+* - Linker/SubSystem/Windows/(/SUBSYSTEM:WINDOWS)
+* - C/C++/Preprocessor/Preprocessor Definitions/(WIN32;DEBUG;_CONSOLE;)
+*
+* Copy generated MyStarfield.scr in Debug directory to C:\Windows\System32
+*
+* The Direct2D API is used for graphics.
+*/
+#include <windows.h>
+#include <d2d1.h>
+#include <string>
+#include <vector>
+#include <random>
+
+using namespace std;
+
+#pragma comment(lib, "d2d1.lib")
+template <typename T>
+T clamp(T val, T minVal, T maxVal) {
+    return (val < minVal) ? minVal : (val > maxVal) ? maxVal : val;
+}
+
+// ---- Config / registry keys
+static LPCWSTR REG_KEY = L"Software\\MyStarfieldScreensaver";
+static LPCWSTR REG_STARS = L"StarCount";
+static LPCWSTR REG_SPEED = L"SpeedPercent";
+static LPCWSTR REG_TWINKLE = L"TwinklePercent";
+static LPCWSTR REG_COLOR_R = L"ColorR";
+static LPCWSTR REG_COLOR_G = L"ColorG";
+static LPCWSTR REG_COLOR_B = L"ColorB";
+static LPCWSTR REG_COLOR = L"Color";
+static LPCWSTR REG_CCOLORS = L"Custom Colors";
+static COLORREF g_CustomColors[16];
+
+// Defaults
+static int g_StarCount = 600;
+static int g_Speed = 60;
+static int g_MaxStars = 1000;
+static int g_MaxSpeed = 250;
+static int g_TwinklePercent = 30;
+static COLORREF g_Color = RGB(255, 255, 240);
+static float g_StarSizeMultiplier = 0.25f;
+static float g_StarBase = 1.0f;   // base numerator
+static float g_StarMin = 0.5f;
+static float g_StarMax = 8.0f;
+static COLORREF g_CurrentStarColor = RGB(255, 255, 255);// Default Star Color!
+HBRUSH g_hBrushColor = NULL;
+
+// Registry helpers
+static int GetRegDWORD(LPCWSTR name, int def)
+{
+    HKEY hKey;
+    DWORD val = def;
+    DWORD size = sizeof(val);
+    if (RegOpenKeyExW(HKEY_CURRENT_USER, REG_KEY, 0, KEY_READ, &hKey) == ERROR_SUCCESS)
+    {
+        RegQueryValueExW(hKey, name, NULL, NULL, (LPBYTE)&val, &size);
+        RegCloseKey(hKey);
+    }
+    return (int)val;
+}
+static void SetRegDWORD(LPCWSTR name, DWORD v)
+{
+    HKEY hKey;
+    if (RegCreateKeyExW(HKEY_CURRENT_USER, REG_KEY, 0, NULL, 0, KEY_WRITE, NULL, &hKey, NULL) == ERROR_SUCCESS)
+    {
+        RegSetValueExW(hKey, name, 0, REG_DWORD, (const BYTE*)&v, sizeof(DWORD));
+        RegCloseKey(hKey);
+    }
+}
+static void LoadSettings()
+{
+    g_StarCount = GetRegDWORD(REG_STARS, g_StarCount);
+    g_Speed = GetRegDWORD(REG_SPEED, g_Speed);
+    g_CurrentStarColor = GetRegDWORD(REG_COLOR, g_CurrentStarColor);
+}
+static void SaveSettings()
+{
+    SetRegDWORD(REG_STARS, (DWORD)g_StarCount);
+    SetRegDWORD(REG_SPEED, (DWORD)g_Speed);
+    SetRegDWORD(REG_COLOR, (DWORD)g_CurrentStarColor);
+}
+// Pick Color Dialog custom colors load/save
+static void LoadCustomColors(vector<COLORREF>& colors)
+{
+    colors.assign(16, RGB(255, 255, 255));
+    HKEY hKey;
+    if (RegOpenKeyExW(HKEY_CURRENT_USER, REG_KEY, 0, KEY_READ, &hKey) == ERROR_SUCCESS)
+    {
+        DWORD type = 0, size = 0;
+        if (RegQueryValueExW(hKey, REG_CCOLORS, nullptr, &type, nullptr, &size) == ERROR_SUCCESS &&
+            type == REG_BINARY && size == sizeof(COLORREF) * 16)
+        {
+            RegQueryValueExW(hKey, REG_CCOLORS, nullptr, &type, reinterpret_cast<LPBYTE>(colors.data()), &size);
+            RegCloseKey(hKey);
+        }
+    }
+    RegCloseKey(hKey);
+}
+static void SaveCustomColors(const vector<COLORREF>& colors)
+{
+    HKEY hKey;
+    if (RegCreateKeyExW(HKEY_CURRENT_USER, REG_KEY, 0, nullptr, 0, KEY_WRITE, nullptr, &hKey, nullptr) == ERROR_SUCCESS)
+    {
+        RegSetValueExW(hKey, REG_CCOLORS, 0, REG_BINARY, reinterpret_cast<const BYTE*>(colors.data()),
+            static_cast<DWORD>(sizeof(COLORREF) * colors.size())) == ERROR_SUCCESS;
+        RegCloseKey(hKey);
+    }
+    RegCloseKey(hKey);
+}
+
+// ---- Starfield rendering structures
+struct Star { float x, y, z, base, phase; };
+struct RenderWindow 
+{
+    HWND hwnd = NULL;
+    ID2D1Factory* factory = nullptr;
+    ID2D1HwndRenderTarget* rt = nullptr;
+    ID2D1SolidColorBrush* brush = nullptr;
+    vector<Star> stars;
+    RECT rc = {};
+    mt19937 rng;
+    bool isPreview = false;
+};
+
+static HINSTANCE g_hInst = NULL;
+static vector<RenderWindow*> g_windows;
+static bool g_Running = true;
+
+// Input filtering
+static LARGE_INTEGER g_PerfFreq;
+static LARGE_INTEGER g_StartCounter;
+static double g_InputDebounceSeconds = 0.66;
+static POINT g_StartMouse = { 0,0 };
+static bool g_StartMouseInit = false;
+static const int g_MouseMoveThreshold = 12; // pixels
+
+// Simple arg parsing
+static void ParseArgs(int argc, wchar_t** argv, wchar_t& modeOut, HWND& hwndOut)
+{
+    modeOut = 0;
+    hwndOut = NULL;
+    if (argc <= 1) return;
+    wstring a1 = argv[1];
+    if (a1.size() >= 2 && (a1[0] == L'/' || a1[0] == L'-'))
+    {
+        wchar_t c = towlower(a1[1]);
+        modeOut = c;
+        size_t colon = a1.find(L':');
+        if (colon != wstring::npos)
+        {
+            wstring num = a1.substr(colon + 1);
+            if (!num.empty()) hwndOut = (HWND)_wcstoui64(num.c_str(), nullptr, 0);
+        }
+        else if (argc >= 3)
+        {
+            wstring a2 = argv[2];
+            bool numeric = !a2.empty();
+            for (wchar_t ch : a2) if (!iswdigit(ch)) { numeric = false; break; }
+            if (numeric) hwndOut = (HWND)_wcstoui64(a2.c_str(), nullptr, 0);
+        }
+    }
+}
+
+// Forward declarations
+LRESULT CALLBACK FullWndProc(HWND, UINT, WPARAM, LPARAM);
+LRESULT CALLBACK PreviewProc(HWND, UINT, WPARAM, LPARAM);
+LRESULT CALLBACK SettingsWndProc(HWND, UINT, WPARAM, LPARAM);
+
+// Direct2D helpers
+static void InitStars(RenderWindow* rw) 
+{
+    RECT r = rw->rc;
+    int w = max(1, r.right - r.left), h = max(1, r.bottom - r.top);
+    rw->stars.clear();
+    rw->stars.reserve(g_StarCount);
+    uniform_real_distribution<float> ux(0.0f, (float)w);
+    uniform_real_distribution<float> uy(0.0f, (float)h);
+    uniform_real_distribution<float> uz(0.2f, 1.0f);
+    uniform_real_distribution<float> ub(0.6f, 1.0f);
+    uniform_real_distribution<float> uph(0.0f, 6.28318530718f);
+    for (int i = 0; i < g_StarCount; ++i) rw->stars.push_back({ ux(rw->rng), uy(rw->rng), uz(rw->rng), ub(rw->rng), uph(rw->rng) });
+}
+static HRESULT CreateRT(RenderWindow* rw) 
+{
+    if (!rw->factory) return E_FAIL;
+    if (rw->rt) 
+    { 
+        rw->rt->Release(); 
+        rw->rt = nullptr; 
+    }
+    D2D1_SIZE_U size = D2D1::SizeU(rw->rc.right - rw->rc.left, rw->rc.bottom - rw->rc.top);
+    D2D1_HWND_RENDER_TARGET_PROPERTIES props = D2D1::HwndRenderTargetProperties(rw->hwnd, size);
+    return rw->factory->CreateHwndRenderTarget(D2D1::RenderTargetProperties(), props, &rw->rt);
+}
+
+static void RenderFrame(RenderWindow* rw, float dt, float totalTime) 
+{
+    if (!rw->rt) return;
+    if (!rw->brush) rw->rt->CreateSolidColorBrush(D2D1::ColorF(1, 1, 1, 1), &rw->brush);
+    rw->rt->BeginDraw();
+    rw->rt->Clear(D2D1::ColorF(D2D1::ColorF::Black));
+    D2D1_SIZE_F size = rw->rt->GetSize();
+    float cx = size.width * 0.5f, cy = size.height * 0.5f;
+    float speed = g_Speed / 100.0f;
+    float twinkle = g_TwinklePercent / 100.0f;
+    for (auto& s : rw->stars) 
+    {
+        s.z -= 0.5f * speed * dt;
+        if (s.z <= 0.05f) {
+            uniform_real_distribution<float> ux(0.0f, size.width);
+            uniform_real_distribution<float> uy(0.0f, size.height);
+            uniform_real_distribution<float> uz(0.5f, 1.0f);
+            uniform_real_distribution<float> ub(0.6f, 1.0f);
+            uniform_real_distribution<float> uph(0.0f, 6.28318530718f);
+            s.x = ux(rw->rng); s.y = uy(rw->rng); s.z = uz(rw->rng); s.base = ub(rw->rng); s.phase = uph(rw->rng);
+        }
+        float px = (s.x - cx) / s.z + cx;
+        float py = (s.y - cy) / s.z + cy;
+        //float psz = 1.0f / s.z; if (psz < 1.0f) psz = 1.0f;
+        float psz = (g_StarBase / s.z) * (0.6f + 0.8f * s.base) * g_StarSizeMultiplier;
+        psz = clamp(psz, g_StarMin, g_StarMax);
+        FLOAT dpiX = 96.0f, dpiY = 96.0f;
+        rw->rt->GetDpi(&dpiX, &dpiY);
+        float dpiScale = dpiX / 96.0f;
+        psz *= dpiScale;
+        float tw = s.base + (sinf(s.phase + (float)totalTime * 5.0f) * 0.5f + 0.5f) * twinkle;
+        float rr = GetRValue(g_Color) / 255.0f * tw;
+        float gg = GetGValue(g_Color) / 255.0f * tw;
+        float bb = GetBValue(g_Color) / 255.0f * tw;
+        rw->brush->SetColor(D2D1::ColorF(rr, gg, bb, 1.0f));
+        D2D1_ELLIPSE ell = D2D1::Ellipse(D2D1::Point2F(px, py), psz, psz);
+        rw->rt->FillEllipse(ell, rw->brush);
+    }
+    HRESULT hr = rw->rt->EndDraw();
+    if (hr == D2DERR_RECREATE_TARGET) { if (rw->rt) { rw->rt->Release(); rw->rt = nullptr; } CreateRT(rw); }
+}
+
+// ---- Foreground check and window procs
+static bool ForegroundIsOurWindow()
+{
+    HWND fg = GetForegroundWindow();
+    if (!fg) return false;
+    DWORD fgPid = 0;
+    GetWindowThreadProcessId(fg, &fgPid);
+    return (fgPid == GetCurrentProcessId());
+}
+
+// Fullscreen window proc (uses strict input filtering)
+LRESULT CALLBACK FullWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) 
+{
+    RenderWindow* rw = (RenderWindow*)GetWindowLongPtrW(hWnd, GWLP_USERDATA);
+    switch (msg) {
+    case WM_CREATE: 
+        g_StartMouseInit = false; 
+        return 0;
+    case WM_SIZE:
+        if (rw) 
+        { 
+            GetClientRect(hWnd, &rw->rc); 
+            if (rw->rt) 
+            { 
+                rw->rt->Release(); 
+                rw->rt = nullptr; 
+            } 
+            CreateRT(rw); 
+            g_StartMouseInit = false; 
+        }
+        return 0;
+    case WM_KEYDOWN:
+    case WM_LBUTTONDOWN:
+    case WM_RBUTTONDOWN:
+    case WM_MBUTTONDOWN:
+    case WM_XBUTTONDOWN:
+    case WM_MOUSEMOVE:
+    {
+        LARGE_INTEGER now;
+        QueryPerformanceCounter(&now);
+        double seconds = double(now.QuadPart - g_StartCounter.QuadPart) / double(g_PerfFreq.QuadPart);
+        if (seconds < g_InputDebounceSeconds) { return 0; }
+        if (!ForegroundIsOurWindow()) { return 0; }
+        if (msg == WM_MOUSEMOVE)
+        {
+            POINT cur; GetCursorPos(&cur);
+            if (!g_StartMouseInit)
+            {
+                g_StartMouse = cur;
+                g_StartMouseInit = true;
+                return 0;
+            }
+            int dx = abs(cur.x - g_StartMouse.x), dy = abs(cur.y - g_StartMouse.y);
+            if (dx < g_MouseMoveThreshold && dy < g_MouseMoveThreshold) { return 0; }
+        }
+        g_Running = false;
+        PostQuitMessage(0);
+        return 0;
+    }
+    case WM_DESTROY: 
+        return 0;
+    default: 
+        return DefWindowProcW(hWnd, msg, wParam, lParam);
+    }
+}
+
+// Preview proc
+LRESULT CALLBACK PreviewProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) 
+{
+    switch (msg) 
+    {
+        case WM_ERASEBKGND: 
+            return 1;
+        case WM_PAINT: 
+        { 
+            PAINTSTRUCT ps; 
+            HDC hdc = BeginPaint(hWnd, &ps); 
+            FillRect(hdc, &ps.rcPaint, (HBRUSH)GetStockObject(BLACK_BRUSH)); 
+            EndPaint(hWnd, &ps); 
+            return 0; 
+        }
+        default: 
+            return DefWindowProcW(hWnd, msg, wParam, lParam);
+        }
+}
+
+// Enum monitors -> create fullscreen windows
+static BOOL CALLBACK MonEnumProc(HMONITOR hMon, HDC, LPRECT, LPARAM) {
+    MONITORINFOEXW mi; mi.cbSize = sizeof(mi);
+    if (!GetMonitorInfoW(hMon, &mi)) return TRUE;
+    RECT r = mi.rcMonitor;
+    RenderWindow* rw = new RenderWindow();
+    rw->rc = r; random_device rd; rw->rng.seed(rd());
+    D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, &rw->factory);
+    static bool reg = false;
+    if (!reg) {
+        WNDCLASSW wc = {}; wc.lpfnWndProc = FullWndProc; wc.hInstance = g_hInst; wc.lpszClassName = L"MyStarfieldFullClass"; wc.hCursor = LoadCursor(NULL, IDC_ARROW);
+        RegisterClassW(&wc); reg = true;
+    }
+    HWND hwnd = CreateWindowExW(WS_EX_TOPMOST, L"MyStarfieldFullClass", L"MyStarfield", WS_POPUP | WS_VISIBLE,
+        r.left, r.top, r.right - r.left, r.bottom - r.top, NULL, NULL, g_hInst, NULL);
+    if (!hwnd) { if (rw->factory) rw->factory->Release(); delete rw; return TRUE; }
+    rw->hwnd = hwnd; SetWindowLongPtrW(hwnd, GWLP_USERDATA, (LONG_PTR)rw); ShowWindow(hwnd, SW_SHOW);
+    GetClientRect(hwnd, &rw->rc); CreateRT(rw); InitStars(rw); g_windows.push_back(rw);
+    return TRUE;
+}
+
+// Run fullscreen
+static void RunFull() 
+{
+    EnumDisplayMonitors(NULL, NULL, MonEnumProc, 0);
+    QueryPerformanceFrequency(&g_PerfFreq);
+    QueryPerformanceCounter(&g_StartCounter);
+    POINT p; GetCursorPos(&p); g_StartMouse = p; g_StartMouseInit = true;
+    LARGE_INTEGER last; QueryPerformanceCounter(&last);
+    double total = 0.0; MSG msg;
+    while (g_Running) {
+        while (PeekMessageW(&msg, NULL, 0, 0, PM_REMOVE))
+        { 
+            if (msg.message == WM_QUIT) 
+            {
+                g_Running = false; break; 
+            } 
+            TranslateMessage(&msg);
+            DispatchMessage(&msg); 
+        }
+        LARGE_INTEGER now; QueryPerformanceCounter(&now);
+        double dt = double(now.QuadPart - last.QuadPart) / double(g_PerfFreq.QuadPart);
+        last = now; total += dt;
+        for (auto rw : g_windows) RenderFrame(rw, (float)dt, (float)total);
+        Sleep(1);
+    }
+    for (auto rw : g_windows) 
+    {
+        if (rw->brush) rw->brush->Release();
+        if (rw->rt) rw->rt->Release();
+        if (rw->factory) rw->factory->Release();
+        if (rw->hwnd) DestroyWindow(rw->hwnd);
+        delete rw;
+    }
+    g_windows.clear();
+}
+
+// Simple preview runner
+static int RunPreview(HWND parent) 
+{
+    if (!IsWindow(parent)) return 0;
+    WNDCLASSW wc = {}; 
+    wc.lpfnWndProc = PreviewProc; 
+    wc.hInstance = g_hInst; 
+    wc.lpszClassName = L"MyStarPre";
+    RegisterClassW(&wc);
+    RECT pr; 
+    GetClientRect(parent, &pr);
+    HWND child = CreateWindowExW(0, wc.lpszClassName, L"", WS_CHILD | WS_VISIBLE, 0, 0, pr.right - pr.left, pr.bottom - pr.top, parent, NULL, g_hInst, NULL);
+    if (!child) 
+    { 
+        UnregisterClassW(wc.lpszClassName, g_hInst); 
+        return 0; 
+    }
+
+    RenderWindow* rw = new RenderWindow();
+    rw->hwnd = child; rw->isPreview = true; rw->rc = pr;
+    random_device rd; 
+    rw->rng.seed(rd());
+    D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, &rw->factory);
+    CreateRT(rw); 
+    InitStars(rw);
+
+    QueryPerformanceFrequency(&g_PerfFreq);
+    LARGE_INTEGER last; 
+    QueryPerformanceCounter(&last);
+    double total = 0.0; 
+    MSG msg;
+    while (IsWindow(child)) 
+    {
+        while (PeekMessageW(&msg, NULL, 0, 0, PM_REMOVE)) 
+        {
+            if (msg.message == WM_QUIT) 
+            {
+                DestroyWindow(child); break; 
+            }
+            TranslateMessage(&msg); 
+            DispatchMessage(&msg);
+        }
+        LARGE_INTEGER now; 
+        QueryPerformanceCounter(&now);
+        double dt = double(now.QuadPart - last.QuadPart) / double(g_PerfFreq.QuadPart);
+        last = now; total += dt;
+        RenderFrame(rw, (float)dt, (float)total);
+        Sleep(15);
+    }
+    if (rw->brush) rw->brush->Release();
+    if (rw->rt) rw->rt->Release();
+    if (rw->factory) rw->factory->Release();
+    DestroyWindow(child);
+    UnregisterClassW(wc.lpszClassName, g_hInst);
+    delete rw;
+    return 0;
+}
+
+// ---------------- Settings dialog programmatic UI ----------------
+// IDs
+enum { CID_OK = 100, CID_CANCEL = 101, CID_EDIT_STARS = 110, CID_EDIT_SPEED = 111, CID_PREVIEW = 112, CID_BUTTON_COLOR = 113, CID_LABEL_COLOR = 114 };
+
+// Create child controls on given window
+static void CreateSettingsControls(HWND dlg)
+{
+    wstring mst = L"Stars (max " + to_wstring(g_MaxStars) + L"):";
+    wstring msp = L"Speed (max " + to_wstring(g_MaxSpeed) + L"):";
+    HFONT hFont = CreateFontW(16, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
+
+    HWND hColorLabel = CreateWindowExW(0, L"STATIC", mst.c_str(), WS_CHILD | WS_VISIBLE | SS_LEFT, 10, 10, 120, 18, dlg, NULL, g_hInst, NULL);
+    HWND hColorEdit = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", NULL, WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_LEFT, 150, 8, 80, 20, dlg, (HMENU)CID_EDIT_STARS, g_hInst, NULL);
+    HWND hSpeedLabel = CreateWindowExW(0, L"STATIC", msp.c_str(), WS_CHILD | WS_VISIBLE | SS_LEFT, 10, 40, 120, 18, dlg, NULL, g_hInst, NULL);
+    HWND hSpeedEdit = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", NULL, WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_LEFT, 150, 38, 80, 20, dlg, (HMENU)CID_EDIT_SPEED, g_hInst, NULL);
+    HWND hColorButton = CreateWindowExW(0, L"BUTTON", L"Pick color", WS_CHILD | WS_VISIBLE, 250, 8, 80, 24, dlg, (HMENU)CID_BUTTON_COLOR, g_hInst, NULL);
+    CreateWindowExW(0, L"STATIC", L"     ", WS_CHILD | WS_VISIBLE | SS_SIMPLE | SS_BLACKFRAME, 250, 38, 80, 26, dlg, (HMENU)CID_LABEL_COLOR, g_hInst, NULL);
+    HWND hOkButton = CreateWindowExW(0, L"BUTTON", L"OK", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 80, 70, 80, 24, dlg, (HMENU)CID_OK, g_hInst, NULL);
+    HWND hCancelButton = CreateWindowExW(0, L"BUTTON", L"Cancel", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 168, 70, 80, 24, dlg, (HMENU)CID_CANCEL, g_hInst, NULL);
+
+    SendMessageW(hColorLabel, WM_SETFONT, (WPARAM)hFont, TRUE);
+    SendMessageW(hColorEdit, WM_SETFONT, (WPARAM)hFont, TRUE);
+    SendMessageW(hSpeedLabel, WM_SETFONT, (WPARAM)hFont, TRUE);
+    SendMessageW(hSpeedEdit, WM_SETFONT, (WPARAM)hFont, TRUE);
+    SendMessageW(hColorButton, WM_SETFONT, (WPARAM)hFont, TRUE);
+    SendMessageW(hOkButton, WM_SETFONT, (WPARAM)hFont, TRUE);
+    SendMessageW(hCancelButton, WM_SETFONT, (WPARAM)hFont, TRUE);
+}
+
+// Settings window proc handles control actions and closes window
+LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) 
+{
+    // retrieve the disabled window when the dialog was created
+    HWND owner = (HWND)GetWindowLongPtrW(hWnd, GWLP_USERDATA);
+    if (!owner) owner = GetParent(hWnd); // fallback for safety
+
+    HWND hColorLabel = GetDlgItem(hWnd, CID_LABEL_COLOR);
+    g_hBrushColor = CreateSolidBrush(g_CurrentStarColor);
+    switch (msg)
+    {
+    case WM_CREATE:
+    {
+        CreateSettingsControls(hWnd);
+        SetDlgItemInt(hWnd, CID_EDIT_STARS, g_StarCount, FALSE);
+        SetDlgItemInt(hWnd, CID_EDIT_SPEED, g_Speed, FALSE);
+        return 0;
+    }
+    case WM_COMMAND:
+    {
+        int id = LOWORD(wParam);
+        if (id == CID_BUTTON_COLOR)
+        {
+            vector<COLORREF> persisted;
+            LoadCustomColors(persisted);
+            for (int i = 0; i < 16; ++i) g_CustomColors[i] = persisted[i];
+
+            CHOOSECOLOR cc = {};
+            ZeroMemory(&cc, sizeof(cc));
+            cc.lStructSize = sizeof(cc);
+            cc.hwndOwner = hWnd; // parent window handle
+            cc.lpCustColors = g_CustomColors;
+            cc.rgbResult = g_CurrentStarColor; // initial color
+            cc.Flags = CC_FULLOPEN | CC_RGBINIT;
+
+            if (ChooseColor(&cc))
+            {
+                // user picked a color — cc.rgbResult now contains the selection
+                g_CurrentStarColor = cc.rgbResult;
+                // Macro's to update RGB components inside the Colorpicker
+                BYTE r = GetRValue(g_CurrentStarColor), g = GetGValue(g_CurrentStarColor), b = GetBValue(g_CurrentStarColor);
+                // save back the updated custom colors
+                vector<COLORREF> toSave(16);
+                for (int i = 0; i < 16; ++i)
+                {
+                    toSave[i] = g_CustomColors[i];
+                }
+                SaveCustomColors(toSave);
+                if (g_hBrushColor) DeleteObject(g_hBrushColor);
+                g_hBrushColor = CreateSolidBrush(g_CurrentStarColor);
+                InvalidateRect(hColorLabel, NULL, TRUE);
+            }
+            return 0;
+        }
+        else if (id == CID_OK)
+        {
+            BOOL ok;
+            int stars = GetDlgItemInt(hWnd, CID_EDIT_STARS, &ok, FALSE);
+            if (!ok) stars = g_StarCount;
+            stars = (int)fmax(1, fmin(g_MaxStars, stars));
+
+            int speed = GetDlgItemInt(hWnd, CID_EDIT_SPEED, &ok, FALSE);
+            if (!ok) speed = g_Speed;
+            speed = (int)fmax(1, fmin(g_MaxSpeed, speed));
+
+            g_StarCount = stars;
+            g_Speed = speed;
+
+            SaveSettings();
+            DestroyWindow(hWnd);
+            return 0;
+        }
+        else if (id == CID_CANCEL)
+        {
+            DestroyWindow(hWnd);
+            return 0;
+        }
+        break;
+    }
+    case WM_CTLCOLORSTATIC:
+    {
+        HDC hdcStatic = (HDC)wParam;
+        HWND hStatic = (HWND)lParam;
+
+        if (GetDlgCtrlID(hStatic) == CID_LABEL_COLOR)
+        {
+            SetBkMode(hdcStatic, OPAQUE);
+            SetBkColor(hdcStatic, g_CurrentStarColor);
+            return (INT_PTR)g_hBrushColor;
+        }
+        break;
+    }
+    case WM_DESTROY:
+    {
+        if (owner && IsWindow(owner))
+        {
+            EnableWindow(owner, TRUE);
+            BringWindowToTop(owner);
+            SetActiveWindow(owner);
+            SetForegroundWindow(owner);
+            SetFocus(owner);
+
+            // Ensure Z-order of Parent Settings Dialog
+            SetWindowPos(owner, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
+
+            if (g_hBrushColor)
+            {
+                DeleteObject(g_hBrushColor);
+                g_hBrushColor = NULL;
+            }
+        }
+        return 0;
+    }
+    default:
+        return DefWindowProcW(hWnd, msg, wParam, lParam);
+    }
+    return 0;
+}
+
+// Register settings class once
+static void EnsureSettingsClassRegistered()
+{
+    static bool reg = false;
+    if (reg) return;
+    WNDCLASSW wc = {};
+    wc.lpfnWndProc = SettingsWndProc;
+    wc.hInstance = g_hInst;
+    wc.lpszClassName = L"MyStarfieldSettingsClass";
+    wc.hCursor = LoadCursor(NULL, IDC_ARROW);
+    wc.hbrBackground = (HBRUSH)(COLOR_BTNFACE + 1);
+    RegisterClassW(&wc);
+    reg = true;
+}
+
+// Show modal popup (centered) and block until closed
+static int ShowSettingsModalPopup(HWND parent)
+{
+    if (!IsWindow(parent)) return 0;
+    EnsureSettingsClassRegistered();
+    HWND wParent = GetParent(parent);
+    if (wParent && IsWindow(wParent)) EnableWindow(wParent, FALSE);
+
+    int w = 360, h = 144;
+    int sw = GetSystemMetrics(SM_CXSCREEN), sh = GetSystemMetrics(SM_CYSCREEN);
+    int x = (sw - w) / 2, y = (sh - h) / 2;
+
+    // In ShowSettingsModalPopup, after disabling wParent store it on the dialog
+    HWND dlg = CreateWindowExW(WS_EX_DLGMODALFRAME, L"MyStarfieldSettingsClass", L"MyStarfield Settings", WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU, x, y, w, h, parent, NULL, g_hInst, NULL);
+    if (!dlg)
+    {
+        if (wParent && IsWindow(wParent)) EnableWindow(wParent, TRUE);
+        return -1;
+    }
+
+    // remember which window is disabled so SettingsWndProc can restore it later
+    SetWindowLongPtrW(dlg, GWLP_USERDATA, (LONG_PTR)wParent);
+    ShowWindow(dlg, SW_SHOW);
+    UpdateWindow(dlg);
+
+    // Modal message loop: run until dlg destroyed
+    MSG msg;
+    while (IsWindow(dlg) && GetMessageW(&msg, NULL, 0, 0))
+    {
+        TranslateMessage(&msg);
+        DispatchMessageW(&msg);
+    }
+    if (wParent && IsWindow(wParent)) EnableWindow(wParent, TRUE);
+    return 0;
+}
+
+// Entry point
+int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int)
+{
+    g_hInst = hInstance;
+    LoadSettings();
+    wchar_t modPath[MAX_PATH] = {};
+    GetModuleFileNameW(NULL, modPath, MAX_PATH);
+    int argc = 0;
+    wchar_t** argv = CommandLineToArgvW(GetCommandLineW(), &argc);
+    wchar_t mode = 0;
+    HWND argH = NULL;
+    ParseArgs(argc, argv, mode, argH);
+    {
+        char buf[256]{};
+    }
+    if (mode == 'c')
+    {
+        ShowSettingsModalPopup(argH);
+        LocalFree(argv);
+        return 0;
+    }
+    if (mode == 'p')
+    {
+        if (argH)
+        {
+            RunPreview(argH);
+            LocalFree(argv);
+            return 0;
+        }
+    }
+    // Default: fullscreen
+    g_Running = true;
+    RunFull();
+    LocalFree(argv);
+    return 0;
+}
+
