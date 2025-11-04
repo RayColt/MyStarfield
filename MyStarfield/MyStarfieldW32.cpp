@@ -24,7 +24,7 @@ static LPCWSTR REG_CCOLORS = L"Custom Colors";
 static COLORREF g_CustomColors[16];
 
 // Defaults
-static int g_StarCount = 200;
+static int g_StarCount = 300;
 static int g_Speed = 10;
 static int g_MaxStars = 1000;
 static int g_MaxSpeed = 250;
@@ -114,6 +114,11 @@ struct RenderWindow
     vector<Star> stars;
     mt19937 rng;
     bool isPreview = false;
+
+    HANDLE hThread = NULL;        // worker thread handle
+    DWORD  threadId = 0;          // thread id
+    HANDLE hStopEvent = NULL;     // signal thread to stop (optional)
+
 };
 
 // Globals
@@ -429,42 +434,125 @@ LRESULT CALLBACK PreviewProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
     }
 }
 
-// Monitor enumeration -> create fullscreen windows
-static BOOL CALLBACK MonEnumProc(HMONITOR hMon, HDC, LPRECT, LPARAM)
+// ThreadParam
+struct ThreadParam 
+{ 
+    RECT rc; 
+    HWND ownerForParent; 
+    /* optional */
+    RenderWindow* rw; 
+};
+
+// handles rendering tasks in a separate thread
+static DWORD WINAPI RenderThreadProc(LPVOID lpv)
 {
-    MONITORINFOEXW mi;
-    mi.cbSize = sizeof(mi);
-    if (!GetMonitorInfoW(hMon, &mi)) return TRUE;
-    RECT r = mi.rcMonitor;
-    RenderWindow* rw = new RenderWindow();
-    rw->rc = r;
-    random_device rd;
-    rw->rng.seed(rd());
-    static bool reg = false;
-    if (!reg)
+    ThreadParam* tp = (ThreadParam*)lpv;
+    RenderWindow* rw = tp->rw;
+    RECT r = tp->rc;
+    delete tp;
+
+    // register class local to this thread (class name can be same across threads)
+    WNDCLASSW wc = {};
+    wc.lpfnWndProc = FullWndProc;
+    wc.hInstance = g_hInst;
+    wc.lpszClassName = L"StarfieldFullClassThreaded";
+    wc.hCursor = LoadCursor(NULL, IDC_ARROW);
+    RegisterClassW(&wc);
+
+    HWND hwnd = CreateWindowExW(WS_EX_TOPMOST, wc.lpszClassName, L"MyStarfield", WS_POPUP | WS_VISIBLE, r.left, r.top, r.right - r.left, r.bottom - r.top, NULL, NULL, g_hInst, NULL);
+    if (!hwnd) 
     {
-        WNDCLASSW wc = {}; 
-        wc.lpfnWndProc = FullWndProc; 
-        wc.hInstance = g_hInst;
-        wc.lpszClassName = L"StarfieldFullClass";
-        wc.hCursor = LoadCursor(NULL, IDC_ARROW);
-        RegisterClassW(&wc); 
-        reg = true;
+        UnregisterClassW(wc.lpszClassName, g_hInst);
+        // signal failure
+        return 1;
     }
-    HWND hwnd = CreateWindowExW(WS_EX_TOPMOST, L"StarfieldFullClass", L"Starfield", WS_POPUP | WS_VISIBLE,
-        r.left, r.top, r.right - r.left, r.bottom - r.top, NULL, NULL, g_hInst, NULL);
-    if (!hwnd)
-    {
-        delete rw;
-        return TRUE;
-    }
+
+    // attach RenderWindow to hwnd and store rw pointer
     rw->hwnd = hwnd;
     SetWindowLongPtrW(hwnd, GWLP_USERDATA, (LONG_PTR)rw);
-    ShowCursor(FALSE);
-    ShowWindow(hwnd, SW_SHOW);
+
+    // create backbuffer and stars on this thread
     GetClientRect(hwnd, &rw->rc);
     CreateBackbuffer(rw);
     InitStars(rw);
+
+    // hide cursor for fullscreen
+    ShowCursor(FALSE);
+
+    // timekeeping
+    QueryPerformanceFrequency(&g_PerfFreq);
+    LARGE_INTEGER last; QueryPerformanceCounter(&last);
+    double total = 0.0;
+
+    // message + render loop
+    MSG msg;
+    while (g_Running && IsWindow(hwnd)) 
+    {
+        // process all pending messages
+        while (PeekMessageW(&msg, NULL, 0, 0, PM_REMOVE)) 
+        {
+            if (msg.message == WM_QUIT) 
+            { 
+                g_Running = false; 
+                break; 
+            }
+            TranslateMessage(&msg);
+            DispatchMessageW(&msg);
+        }
+
+        LARGE_INTEGER now; QueryPerformanceCounter(&now);
+        double dt = double(now.QuadPart - last.QuadPart) / double(g_PerfFreq.QuadPart);
+        last = now;
+        total += dt;
+
+        // render on this thread
+        RenderFrame(rw, (float)dt, (float)total);
+
+        // break if stop requested by event
+        if (rw->hStopEvent && WaitForSingleObject(rw->hStopEvent, 0) == WAIT_OBJECT_0) break;
+
+        Sleep(8);
+    }
+
+    // cleanup for this thread/window
+    DestroyBackbuffer(rw);
+    ShowCursor(TRUE);
+    if (rw->hwnd) 
+    { 
+        DestroyWindow(rw->hwnd); rw->hwnd = NULL; 
+    }
+    UnregisterClassW(wc.lpszClassName, g_hInst);
+    return 0;
+}
+
+// Monitor enumeration -> create fullscreen windows
+static BOOL CALLBACK MonEnumProc(HMONITOR hMon, HDC, LPRECT, LPARAM) 
+{
+    MONITORINFOEXW mi; 
+    mi.cbSize = sizeof(mi);
+    if (!GetMonitorInfoW(hMon, &mi)) return TRUE;
+    RECT r = mi.rcMonitor;
+
+    RenderWindow* rw = new RenderWindow();
+    rw->rc = r;
+    random_device rd; rw->rng.seed(rd());
+    rw->hStopEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
+
+    // prepare thread param
+    ThreadParam* tp = new ThreadParam();
+    tp->rc = r;
+    tp->rw = rw;
+
+    // spawn thread which will create the window and run the render loop
+    rw->hThread = CreateThread(NULL, 0, RenderThreadProc, tp, 0, &rw->threadId);
+    if (!rw->hThread) 
+    {
+        CloseHandle(rw->hStopEvent);
+        delete rw;
+        delete tp;
+        return TRUE;
+    }
+
     g_Windows.push_back(rw);
     return TRUE;
 }
@@ -766,6 +854,32 @@ static int ShowSettingsModalPopup(HWND parent)
     return 0;
 }
 
+// Shutdown helpers
+static void StopAllThreadsAndCleanup() 
+{
+    // signal stop to each worker
+    for (auto rw : g_Windows) 
+    {
+        if (rw->hStopEvent) SetEvent(rw->hStopEvent);
+        // optionally PostThreadMessage to wake thread message loop
+        if (rw->threadId) PostThreadMessage(rw->threadId, WM_USER + 1, 0, 0);
+    }
+
+    // wait for threads to exit
+    for (auto rw : g_Windows) 
+    {
+        if (rw->hThread) 
+        {
+            WaitForSingleObject(rw->hThread, 2000);
+            CloseHandle(rw->hThread);
+        }
+        CloseHandle(rw->hStopEvent);
+        // RenderWindow memory belongs to us; windows are destroyed inside threads
+        delete rw;
+    }
+    g_Windows.clear();
+}
+
 // Entry point
 int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int) 
 {
@@ -800,5 +914,6 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int)
     g_Running = true;
     RunFull();
     LocalFree(argv);
+    StopAllThreadsAndCleanup();
     return 0;
 }
