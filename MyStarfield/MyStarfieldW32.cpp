@@ -88,7 +88,7 @@ static void SaveCustomColors(const vector<COLORREF>& colors)
     if (RegCreateKeyExW(HKEY_CURRENT_USER, REG_KEY, 0, nullptr, 0, KEY_WRITE, nullptr, &hKey, nullptr) == ERROR_SUCCESS)
     {
         RegSetValueExW(hKey, REG_CCOLORS, 0, REG_BINARY, reinterpret_cast<const BYTE*>(colors.data()),
-        static_cast<DWORD>(sizeof(COLORREF) * colors.size())) == ERROR_SUCCESS;
+            static_cast<DWORD>(sizeof(COLORREF) * colors.size()));
         RegCloseKey(hKey);
     }
     RegCloseKey(hKey);
@@ -535,7 +535,8 @@ static BOOL CALLBACK MonEnumProc(HMONITOR hMon, HDC, LPRECT, LPARAM)
 
     RenderWindow* rw = new RenderWindow();
     rw->rc = r;
-    random_device rd; rw->rng.seed(rd());
+    random_device rd; 
+    rw->rng.seed(rd());
     rw->hStopEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
 
     // prepare thread param
@@ -547,7 +548,11 @@ static BOOL CALLBACK MonEnumProc(HMONITOR hMon, HDC, LPRECT, LPARAM)
     rw->hThread = CreateThread(NULL, 0, RenderThreadProc, tp, 0, &rw->threadId);
     if (!rw->hThread) 
     {
-        CloseHandle(rw->hStopEvent);
+        if (rw && rw->hStopEvent) 
+        {
+            CloseHandle(rw->hStopEvent);
+            rw->hStopEvent = NULL;
+        }
         delete rw;
         delete tp;
         return TRUE;
