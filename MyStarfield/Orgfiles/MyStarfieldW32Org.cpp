@@ -15,54 +15,6 @@
 
 using namespace std;
 
-// Structs
-// Star
-struct Star
-{
-    float x, y, z;
-    float speed;
-};
-
-// RenderWindow
-struct RenderWindow
-{
-    HWND hwnd = NULL;
-    HDC backHdc = NULL;
-    HBITMAP backBmp = NULL;
-    HBITMAP oldBackBmp = NULL;
-    RECT rc = {};
-    vector<Star> stars;
-    mt19937 rng;
-    bool isPreview = false;
-
-    HANDLE hThread = NULL;        // worker thread handle
-    DWORD  threadId = 0;          // thread id
-    HANDLE hStopEvent = NULL;     // signal thread to stop (optional)
-
-};
-
-// ThreadParam
-struct ThreadParam
-{
-    RECT rc;
-    HWND ownerForParent;
-    /* optional */
-    RenderWindow* rw;
-};
-
-// Globals
-static HINSTANCE g_hInst = NULL;
-static vector<RenderWindow*> g_Windows;
-static bool g_Running = true;
-
-// Input filtering
-static LARGE_INTEGER g_PerfFreq;
-static LARGE_INTEGER g_StartCounter;
-static double g_InputDebounceSeconds = 0.66; // time to stop screensaver after mouse move
-static POINT g_StartMouse = { 0,0 };
-static bool g_StartMouseInit = false;
-static const int g_MouseMoveThreshold = 12; // pixels
-
 // ---- Config / registry keys
 static LPCWSTR REG_KEY = L"Software\\MyStarfieldW32";
 static LPCWSTR REG_STARS = L"StarCount";
@@ -72,7 +24,7 @@ static LPCWSTR REG_CCOLORS = L"Custom Colors";
 static COLORREF g_CustomColors[16];
 
 // Defaults
-static int g_StarCount = 300;
+static int g_StarCount = 200;
 static int g_Speed = 10;
 static int g_MaxStars = 1000;
 static int g_MaxSpeed = 250;
@@ -136,11 +88,46 @@ static void SaveCustomColors(const vector<COLORREF>& colors)
     if (RegCreateKeyExW(HKEY_CURRENT_USER, REG_KEY, 0, nullptr, 0, KEY_WRITE, nullptr, &hKey, nullptr) == ERROR_SUCCESS)
     {
         RegSetValueExW(hKey, REG_CCOLORS, 0, REG_BINARY, reinterpret_cast<const BYTE*>(colors.data()),
-            static_cast<DWORD>(sizeof(COLORREF) * colors.size()));
+        static_cast<DWORD>(sizeof(COLORREF) * colors.size())) == ERROR_SUCCESS;
         RegCloseKey(hKey);
     }
     RegCloseKey(hKey);
 }
+
+// Star model
+struct Star
+{
+    float x;     // world X (centered)
+    float y;     // world Y (centered)
+    float z;     // depth
+    float speed; // per-star speed (depth units / second or arbitrary units)
+};
+
+// RenderWindow
+struct RenderWindow
+{
+    HWND hwnd = NULL;
+    HDC backHdc = NULL;
+    HBITMAP backBmp = NULL;
+    HBITMAP oldBackBmp = NULL;
+    RECT rc = {};
+    vector<Star> stars;
+    mt19937 rng;
+    bool isPreview = false;
+};
+
+// Globals
+static HINSTANCE g_hInst = NULL;
+static vector<RenderWindow*> g_Windows;
+static bool g_Running = true;
+
+// Input filtering
+static LARGE_INTEGER g_PerfFreq;
+static LARGE_INTEGER g_StartCounter;
+static double g_InputDebounceSeconds = 0.66; // time to stop screensaver after mouse move
+static POINT g_StartMouse = { 0,0 };
+static bool g_StartMouseInit = false;
+static const int g_MouseMoveThreshold = 12; // pixels
 
 // Simple arg parsing
 static void ParseArgs(int argc, wchar_t** argv, wchar_t& modeOut, HWND& hwndOut)
@@ -169,7 +156,7 @@ static void ParseArgs(int argc, wchar_t** argv, wchar_t& modeOut, HWND& hwndOut)
     }
 }
 
-// backbuffer helpers
+// ---- backbuffer helpers
 static void DestroyBackbuffer(RenderWindow* rw)
 {
     if (!rw) return;
@@ -220,7 +207,7 @@ static const float Z_MIN = 1.0f;
 static const float Z_MAX = 33.0f;
 // FOCAL ~ 1.0 is appropriate for the sample values (x ~ [-1600..1600], z ~ [10..100])
 static const float FOCAL = 9.0f;
-// multiplier that controls drawn core size; increase for larger stars 1.1, 1.2 ....
+// multiplier that controls drawn core size; increase for larger stars
 static const float SIZE_SCALE = 1.0f;
 
 static void InitStars(RenderWindow* rw)
@@ -359,7 +346,7 @@ static void RenderFrame(RenderWindow* rw, float dt, float totalTime)
     ReleaseDC(rw->hwnd, wnd);
 }
 
-// Foreground check and window procs
+// ---- Foreground check and window procs
 static bool ForegroundIsOurWindow()
 {
     HWND fg = GetForegroundWindow();
@@ -442,121 +429,42 @@ LRESULT CALLBACK PreviewProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
     }
 }
 
-// handles rendering tasks in a separate thread
-static DWORD WINAPI RenderThreadProc(LPVOID lpv)
-{
-    ThreadParam* tp = (ThreadParam*)lpv;
-    RenderWindow* rw = tp->rw;
-    RECT r = tp->rc;
-    delete tp;
-
-    // register class local to this thread (class name can be same across threads)
-    WNDCLASSW wc = {};
-    wc.lpfnWndProc = FullWndProc;
-    wc.hInstance = g_hInst;
-    wc.lpszClassName = L"StarfieldFullClassThreaded";
-    wc.hCursor = LoadCursor(NULL, IDC_ARROW);
-    RegisterClassW(&wc);
-
-    HWND hwnd = CreateWindowExW(WS_EX_TOPMOST, wc.lpszClassName, L"MyStarfield", WS_POPUP | WS_VISIBLE, r.left, r.top, r.right - r.left, r.bottom - r.top, NULL, NULL, g_hInst, NULL);
-    if (!hwnd) 
-    {
-        UnregisterClassW(wc.lpszClassName, g_hInst);
-        // signal failure
-        return 1;
-    }
-
-    // attach RenderWindow to hwnd and store rw pointer
-    rw->hwnd = hwnd;
-    SetWindowLongPtrW(hwnd, GWLP_USERDATA, (LONG_PTR)rw);
-
-    // create backbuffer and stars on this thread
-    GetClientRect(hwnd, &rw->rc);
-    CreateBackbuffer(rw);
-    InitStars(rw);
-
-    // hide cursor for fullscreen
-    ShowCursor(FALSE);
-
-    // timekeeping
-    QueryPerformanceFrequency(&g_PerfFreq);
-    LARGE_INTEGER last; QueryPerformanceCounter(&last);
-    double total = 0.0;
-
-    // message + render loop
-    MSG msg;
-    while (g_Running && IsWindow(hwnd)) 
-    {
-        // process all pending messages
-        while (PeekMessageW(&msg, NULL, 0, 0, PM_REMOVE)) 
-        {
-            if (msg.message == WM_QUIT) 
-            { 
-                g_Running = false; 
-                break; 
-            }
-            TranslateMessage(&msg);
-            DispatchMessageW(&msg);
-        }
-
-        LARGE_INTEGER now; QueryPerformanceCounter(&now);
-        double dt = double(now.QuadPart - last.QuadPart) / double(g_PerfFreq.QuadPart);
-        last = now;
-        total += dt;
-
-        // render on this thread
-        RenderFrame(rw, (float)dt, (float)total);
-
-        // break if stop requested by event
-        if (rw->hStopEvent && WaitForSingleObject(rw->hStopEvent, 0) == WAIT_OBJECT_0) break;
-
-        Sleep(8);
-    }
-
-    // cleanup for this thread/window
-    DestroyBackbuffer(rw);
-    ShowCursor(TRUE);
-    if (rw->hwnd) 
-    { 
-        DestroyWindow(rw->hwnd); rw->hwnd = NULL; 
-    }
-    UnregisterClassW(wc.lpszClassName, g_hInst);
-    return 0;
-}
-
 // Monitor enumeration -> create fullscreen windows
-static BOOL CALLBACK MonEnumProc(HMONITOR hMon, HDC, LPRECT, LPARAM) 
+static BOOL CALLBACK MonEnumProc(HMONITOR hMon, HDC, LPRECT, LPARAM)
 {
-    MONITORINFOEXW mi; 
+    MONITORINFOEXW mi;
     mi.cbSize = sizeof(mi);
     if (!GetMonitorInfoW(hMon, &mi)) return TRUE;
     RECT r = mi.rcMonitor;
-
     RenderWindow* rw = new RenderWindow();
     rw->rc = r;
-    random_device rd; 
+    random_device rd;
     rw->rng.seed(rd());
-    rw->hStopEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
-
-    // prepare thread param
-    ThreadParam* tp = new ThreadParam();
-    tp->rc = r;
-    tp->rw = rw;
-
-    // spawn thread which will create the window and run the render loop
-    rw->hThread = CreateThread(NULL, 0, RenderThreadProc, tp, 0, &rw->threadId);
-    if (!rw->hThread) 
+    static bool reg = false;
+    if (!reg)
     {
-        if (rw && rw->hStopEvent) 
-        {
-            CloseHandle(rw->hStopEvent);
-            rw->hStopEvent = NULL;
-        }
+        WNDCLASSW wc = {}; 
+        wc.lpfnWndProc = FullWndProc; 
+        wc.hInstance = g_hInst;
+        wc.lpszClassName = L"StarfieldFullClass";
+        wc.hCursor = LoadCursor(NULL, IDC_ARROW);
+        RegisterClassW(&wc); 
+        reg = true;
+    }
+    HWND hwnd = CreateWindowExW(WS_EX_TOPMOST, L"StarfieldFullClass", L"Starfield", WS_POPUP | WS_VISIBLE,
+        r.left, r.top, r.right - r.left, r.bottom - r.top, NULL, NULL, g_hInst, NULL);
+    if (!hwnd)
+    {
         delete rw;
-        delete tp;
         return TRUE;
     }
-
+    rw->hwnd = hwnd;
+    SetWindowLongPtrW(hwnd, GWLP_USERDATA, (LONG_PTR)rw);
+    ShowCursor(FALSE);
+    ShowWindow(hwnd, SW_SHOW);
+    GetClientRect(hwnd, &rw->rc);
+    CreateBackbuffer(rw);
+    InitStars(rw);
     g_Windows.push_back(rw);
     return TRUE;
 }
@@ -604,7 +512,7 @@ static void RunFull()
     g_Windows.clear();
 }
 
-// Preview runner
+// Simple preview runner
 static int RunPreview(HWND parent)
 {
     if (!IsWindow(parent)) return 0;
@@ -858,32 +766,6 @@ static int ShowSettingsModalPopup(HWND parent)
     return 0;
 }
 
-// Shutdown helpers
-static void StopAllThreadsAndCleanup() 
-{
-    // signal stop to each worker
-    for (auto rw : g_Windows) 
-    {
-        if (rw->hStopEvent) SetEvent(rw->hStopEvent);
-        // optionally PostThreadMessage to wake thread message loop
-        if (rw->threadId) PostThreadMessage(rw->threadId, WM_USER + 1, 0, 0);
-    }
-
-    // wait for threads to exit
-    for (auto rw : g_Windows) 
-    {
-        if (rw->hThread) 
-        {
-            WaitForSingleObject(rw->hThread, 2000);
-            CloseHandle(rw->hThread);
-        }
-        CloseHandle(rw->hStopEvent);
-        // RenderWindow memory belongs to us; windows are destroyed inside threads
-        delete rw;
-    }
-    g_Windows.clear();
-}
-
 // Entry point
 int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int) 
 {
@@ -918,6 +800,5 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int)
     g_Running = true;
     RunFull();
     LocalFree(argv);
-    StopAllThreadsAndCleanup();
     return 0;
 }
