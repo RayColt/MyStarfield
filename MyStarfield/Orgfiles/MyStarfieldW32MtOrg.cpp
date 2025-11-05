@@ -749,11 +749,11 @@ LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPar
             BOOL ok;
             int stars = GetDlgItemInt(hWnd, CID_EDIT_STARS, &ok, FALSE);
             if (!ok) stars = g_StarCount;
-            stars = (int)fmax(1, fmin(g_MaxStars, stars));
+            else stars = (int)fmax(1, fmin(g_MaxStars, stars));
 
             int speed = GetDlgItemInt(hWnd, CID_EDIT_SPEED, &ok, FALSE);
             if (!ok) speed = g_Speed;
-            speed = (int)fmax(1, fmin(g_MaxSpeed, speed));
+            else speed = (int)fmax(1, fmin(g_MaxSpeed, speed));
 
             g_StarCount = stars;
             g_Speed = speed;
