@@ -75,7 +75,7 @@ static LPCWSTR REG_CCOLORS = L"Custom Colors";
 static COLORREF g_CustomColors[16];
 
 // Defaults
-static int g_StarCount = 300;
+static int g_StarCount = 200;
 static int g_Speed = 10;
 static int g_MaxStars = 1000;
 static int g_MaxSpeed = 250;
@@ -549,7 +549,8 @@ static DWORD WINAPI RenderThreadProc(LPVOID lpv)
         }
 
         // time step
-        LARGE_INTEGER now; QueryPerformanceCounter(&now);
+        LARGE_INTEGER now; 
+        QueryPerformanceCounter(&now);
         double dt = double(now.QuadPart - last.QuadPart) / double(perfFreq.QuadPart);
         last = now;
         totalTime += dt;

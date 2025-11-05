@@ -74,7 +74,7 @@ static LPCWSTR REG_CCOLORS = L"Custom Colors";
 static COLORREF g_CustomColors[16];
 
 // Defaults
-static int g_StarCount = 300;
+static int g_StarCount = 200;
 static int g_Speed = 10;
 static int g_MaxStars = 1000;
 static int g_MaxSpeed = 250;
