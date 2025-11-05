@@ -1,5 +1,6 @@
 ﻿/*
 * MyStarfield.cpp
+* Single Threaded starfield:)
 * Build as Windows GUI with Console Entry point with:
 * - Linker/SubSystem/Windows/(/SUBSYSTEM:WINDOWS)
 * - C/C++/Preprocessor/Preprocessor Definitions/(WIN32;DEBUG;_CONSOLE;)

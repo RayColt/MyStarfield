@@ -1,5 +1,6 @@
-﻿/*
+/*
 * MyStarfield.cpp
+* Threaded MyStarfield: one render thread per monitor/window.
 * Build as Windows GUI with Console Entry point with:
 * - Linker/SubSystem/Windows/(/SUBSYSTEM:WINDOWS)
 * - C/C++/Preprocessor/Preprocessor Definitions/(WIN32;DEBUG;_CONSOLE;)
@@ -45,15 +46,17 @@ struct RenderWindow
 struct ThreadParam
 {
     RECT rc;
+    // optional: pass as owner so 
+    // overlay/preview behaviors remain
     HWND ownerForParent;
-    /* optional */
     RenderWindow* rw;
+    const wchar_t* className;
 };
 
-// Globals
-static HINSTANCE g_hInst = NULL;
+// global collection of windows/threads
 static vector<RenderWindow*> g_Windows;
-static bool g_Running = true;
+static HINSTANCE g_hInst = NULL;
+static atomic_bool g_Running{ false };
 
 // Input filtering
 static LARGE_INTEGER g_PerfFreq;
@@ -63,7 +66,7 @@ static POINT g_StartMouse = { 0,0 };
 static bool g_StartMouseInit = false;
 static const int g_MouseMoveThreshold = 12; // pixels
 
-// ---- Config / registry keys
+// Config / registry keys
 static LPCWSTR REG_KEY = L"Software\\MyStarfieldW32";
 static LPCWSTR REG_STARS = L"StarCount";
 static LPCWSTR REG_SPEED = L"Speed";
@@ -82,8 +85,8 @@ HBRUSH g_hBrushColor = NULL;
 // Registry helpers
 static int GetRegDWORD(LPCWSTR name, int def)
 {
-    HKEY hKey; 
-    DWORD val = def; 
+    HKEY hKey;
+    DWORD val = def;
     DWORD size = sizeof(val);
     if (RegOpenKeyExW(HKEY_CURRENT_USER, REG_KEY, 0, KEY_READ, &hKey) == ERROR_SUCCESS)
     {
@@ -92,6 +95,7 @@ static int GetRegDWORD(LPCWSTR name, int def)
     }
     return (int)val;
 }
+
 static void SetRegDWORD(LPCWSTR name, DWORD v)
 {
     HKEY hKey;
@@ -101,20 +105,23 @@ static void SetRegDWORD(LPCWSTR name, DWORD v)
         RegCloseKey(hKey);
     }
 }
+
 static void LoadSettings()
 {
     g_StarCount = GetRegDWORD(REG_STARS, g_StarCount);
     g_Speed = GetRegDWORD(REG_SPEED, g_Speed);
-	g_CurrentStarColor = GetRegDWORD(REG_COLOR, g_CurrentStarColor);
+    g_CurrentStarColor = GetRegDWORD(REG_COLOR, g_CurrentStarColor);
 }
+
 static void SaveSettings()
 {
     SetRegDWORD(REG_STARS, (DWORD)g_StarCount);
     SetRegDWORD(REG_SPEED, (DWORD)g_Speed);
-	SetRegDWORD(REG_COLOR, (DWORD)g_CurrentStarColor);
+    SetRegDWORD(REG_COLOR, (DWORD)g_CurrentStarColor);
 }
+
 // Pick Color Dialog custom colors load/save
-static void LoadCustomColors(vector<COLORREF>& colors) 
+static void LoadCustomColors(vector<COLORREF>& colors)
 {
     colors.assign(16, RGB(255, 255, 255));
     HKEY hKey;
@@ -130,6 +137,7 @@ static void LoadCustomColors(vector<COLORREF>& colors)
     }
     RegCloseKey(hKey);
 }
+
 static void SaveCustomColors(const vector<COLORREF>& colors)
 {
     HKEY hKey;
@@ -142,10 +150,11 @@ static void SaveCustomColors(const vector<COLORREF>& colors)
     RegCloseKey(hKey);
 }
 
+// Utilities
 // Simple arg parsing
 static void ParseArgs(int argc, wchar_t** argv, wchar_t& modeOut, HWND& hwndOut)
 {
-    modeOut = 0; 
+    modeOut = 0;
     hwndOut = NULL;
     if (argc <= 1) return;
     wstring a1 = argv[1];
@@ -168,7 +177,6 @@ static void ParseArgs(int argc, wchar_t** argv, wchar_t& modeOut, HWND& hwndOut)
         }
     }
 }
-
 // backbuffer helpers
 static void DestroyBackbuffer(RenderWindow* rw)
 {
@@ -210,6 +218,28 @@ static bool CreateBackbuffer(RenderWindow* rw)
     FillRect(rw->backHdc, &rc, b);
     ReleaseDC(rw->hwnd, wnd);
     return true;
+}
+
+static void SafeCloseHandle(HANDLE& h) 
+{
+    if (h) 
+    { 
+        CloseHandle(h);
+        h = NULL; 
+    }
+}
+
+// Get top-level owner to disable instead of a child preview window
+static HWND GetModalDisableTarget(HWND possibleParent) 
+{
+    if (!possibleParent || !IsWindow(possibleParent)) return NULL;
+    LONG_PTR style = GetWindowLongPtr(possibleParent, GWL_STYLE);
+    if (style & WS_CHILD) 
+    {
+        HWND top = GetAncestor(possibleParent, GA_ROOTOWNER);
+        return top ? top : possibleParent;
+    }
+    return possibleParent;
 }
 
 // InitStars: centered world coords (so projection works predictably)
@@ -321,16 +351,16 @@ static void RenderFrame(RenderWindow* rw, float dt, float totalTime)
         // skip if offscreen
         if (px + psz < 0 || px - psz > w || py + psz < 0 || py - psz > h) continue;
         HBRUSH oldBrush = nullptr;
-        if (brushes[bucket]) 
+        if (brushes[bucket])
         {
             int ix = (int)lroundf(px);
             int iy = (int)lroundf(py);
-            if (psz <= 1) 
+            if (psz <= 1)
             {
                 // 1-pixel star: avoid creating a brush per star, used SetPixelV for speed
                 SetPixelV(rw->backHdc, ix, iy, RGB(br, bg, bb));
             }
-            else 
+            else
             {
                 // existing bucket brush approach for larger stars
                 HBRUSH oldBrush = (HBRUSH)SelectObject(rw->backHdc, brushes[bucket]);
@@ -369,7 +399,7 @@ static bool ForegroundIsOurWindow()
     return (fgPid == GetCurrentProcessId());
 }
 
-// Fullscreen window proc (uses input filtering)
+// Window procedure used by render thread windows(uses input filtering)
 LRESULT CALLBACK FullWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
     RenderWindow* rw = (RenderWindow*)GetWindowLongPtrW(hWnd, GWLP_USERDATA);
@@ -410,8 +440,8 @@ LRESULT CALLBACK FullWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
                 }
                 int dx = abs(cur.x - g_StartMouse.x), dy = abs(cur.y - g_StartMouse.y);
                 if (dx < g_MouseMoveThreshold && dy < g_MouseMoveThreshold) { return 0; }
-            }
-            g_Running = false; 
+             }
+            g_Running = false;
             PostQuitMessage(0);
             return 0;
         }
@@ -427,64 +457,83 @@ LRESULT CALLBACK PreviewProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
 {
     switch (msg)
     {
-        case WM_ERASEBKGND: 
-            return 1;
-        case WM_PAINT:
-        {
-            PAINTSTRUCT ps;
-            HDC hdc = BeginPaint(hWnd, &ps);
-            FillRect(hdc, &ps.rcPaint, (HBRUSH)GetStockObject(BLACK_BRUSH));
-            EndPaint(hWnd, &ps);
-            return 0;
-        }
-        default: 
-            return DefWindowProcW(hWnd, msg, wParam, lParam);
+    case WM_ERASEBKGND:
+        return 1;
+    case WM_PAINT:
+    {
+        PAINTSTRUCT ps;
+        HDC hdc = BeginPaint(hWnd, &ps);
+        FillRect(hdc, &ps.rcPaint, (HBRUSH)GetStockObject(BLACK_BRUSH));
+        EndPaint(hWnd, &ps);
+        return 0;
+    }
+    default:
+        return DefWindowProcW(hWnd, msg, wParam, lParam);
     }
 }
 
-// handles rendering tasks in a separate thread
-static DWORD WINAPI RenderThreadProc(LPVOID lpv)
+// Thread proc
+static DWORD WINAPI RenderThreadProc(LPVOID lpv) 
 {
     ThreadParam* tp = (ThreadParam*)lpv;
     RenderWindow* rw = tp->rw;
     RECT r = tp->rc;
+    HWND owner = tp->ownerForParent;
+    wstring className = tp->className ? tp->className : L"MyStarfieldMT";
     delete tp;
 
-    // register class local to this thread (class name can be same across threads)
+    // Register a thread-local window class
     WNDCLASSW wc = {};
     wc.lpfnWndProc = FullWndProc;
     wc.hInstance = g_hInst;
-    wc.lpszClassName = L"StarfieldFullClassThreaded";
+    wc.lpszClassName = className.c_str();
     wc.hCursor = LoadCursor(NULL, IDC_ARROW);
+    wc.hbrBackground = (HBRUSH)(4 + 1);
     RegisterClassW(&wc);
 
-    HWND hwnd = CreateWindowExW(WS_EX_TOPMOST, wc.lpszClassName, L"MyStarfield", WS_POPUP | WS_VISIBLE, r.left, r.top, r.right - r.left, r.bottom - r.top, NULL, NULL, g_hInst, NULL);
+    // Create the window on this thread. Use owner=owner so if owner was a preview host
+    // the dialog remains properly associated; the thread owns this window.
+    HWND hwnd = CreateWindowExW(
+        WS_EX_TOPMOST,
+        className.c_str(),
+        L"MyStarfield",
+        WS_POPUP | WS_VISIBLE,
+        r.left, r.top, r.right - r.left, r.bottom - r.top,
+        owner, // owner/parent for z-order/embedding
+        NULL,
+        g_hInst,
+        NULL
+    );
+
     if (!hwnd) 
     {
-        UnregisterClassW(wc.lpszClassName, g_hInst);
-        // signal failure
+        UnregisterClassW(className.c_str(), g_hInst);
+		// signal failure
         return 1;
     }
 
-    // attach RenderWindow to hwnd and store rw pointer
+    // attach RenderWindow to hwnd
     rw->hwnd = hwnd;
     SetWindowLongPtrW(hwnd, GWLP_USERDATA, (LONG_PTR)rw);
 
-    // create backbuffer and stars on this thread
+    // initialize backbuffer and stars on this thread
     GetClientRect(hwnd, &rw->rc);
     CreateBackbuffer(rw);
     InitStars(rw);
 
-    // hide cursor for fullscreen
-    ShowCursor(FALSE);
+    // optionally hide cursor for fullscreen effect
+    // call ShowCursor(FALSE) until hidden; keep balanced on exit
+    while (ShowCursor(FALSE) >= 0) { /* decrement to hidden */ }
 
-    // timekeeping
-    QueryPerformanceFrequency(&g_PerfFreq);
-    LARGE_INTEGER last; QueryPerformanceCounter(&last);
-    double total = 0.0;
+    // high-resolution timing
+    LARGE_INTEGER perfFreq = {};
+    QueryPerformanceFrequency(&perfFreq);
+    LARGE_INTEGER last; 
+    QueryPerformanceCounter(&last);
+    double totalTime = 0.0;
 
-    // message + render loop
     MSG msg;
+    // message + render loop
     while (g_Running && IsWindow(hwnd)) 
     {
         // process all pending messages
@@ -499,59 +548,66 @@ static DWORD WINAPI RenderThreadProc(LPVOID lpv)
             DispatchMessageW(&msg);
         }
 
+        // time step
         LARGE_INTEGER now; QueryPerformanceCounter(&now);
-        double dt = double(now.QuadPart - last.QuadPart) / double(g_PerfFreq.QuadPart);
+        double dt = double(now.QuadPart - last.QuadPart) / double(perfFreq.QuadPart);
         last = now;
-        total += dt;
+        totalTime += dt;
 
-        // render on this thread
-        RenderFrame(rw, (float)dt, (float)total);
+        // render frame using your RenderFrame function; this draws into rw->backHdc
+        RenderFrame(rw, (float)dt, (float)totalTime);
 
-        // break if stop requested by event
+        // Blit backbuffer to screen already happens inside RenderFrame.
+        // If not, you would BitBlt here from rw->backHdc to the window DC.
+
+        // check stop event quickly
         if (rw->hStopEvent && WaitForSingleObject(rw->hStopEvent, 0) == WAIT_OBJECT_0) break;
 
+        // frame pacing; yield a bit (adjust to taste)
         Sleep(8);
     }
 
-    // cleanup for this thread/window
+    // restore cursor visibility
+    while (ShowCursor(TRUE) < 0) { /* increment until visible again */ }
+
+    // cleanup backbuffer and window (must run on this thread)
     DestroyBackbuffer(rw);
-    ShowCursor(TRUE);
-    if (rw->hwnd) 
-    { 
-        DestroyWindow(rw->hwnd); rw->hwnd = NULL; 
+    if (IsWindow(hwnd))
+    {
+        DestroyWindow(hwnd); // this will send WM_DESTROY
     }
-    UnregisterClassW(wc.lpszClassName, g_hInst);
+    UnregisterClassW(className.c_str(), g_hInst);
     return 0;
 }
 
-// Monitor enumeration -> create fullscreen windows
-static BOOL CALLBACK MonEnumProc(HMONITOR hMon, HDC, LPRECT, LPARAM) 
+// Monitor enumeration + thread spawn -> create fullscreen windows
+static BOOL CALLBACK MonEnumProc(HMONITOR hMon, HDC, LPRECT, LPARAM)
 {
     MONITORINFOEXW mi; 
     mi.cbSize = sizeof(mi);
     if (!GetMonitorInfoW(hMon, &mi)) return TRUE;
     RECT r = mi.rcMonitor;
 
+    // create RenderWindow and seed RNG
     RenderWindow* rw = new RenderWindow();
-    rw->rc = r;
-    random_device rd; 
-    rw->rng.seed(rd());
+    random_device rd;
+    rw->rng.seed((unsigned int)(rd() ^ GetTickCount()));
+
+    // create a stop event used to tell the worker to exit quickly
     rw->hStopEvent = CreateEvent(NULL, TRUE, FALSE, NULL);
 
-    // prepare thread param
+    // prepare thread parameters
     ThreadParam* tp = new ThreadParam();
     tp->rc = r;
+    tp->ownerForParent = NULL; // no owner for top-level fullscreen windows
     tp->rw = rw;
+    tp->className = L"StarfieldFullClassThreaded";
 
-    // spawn thread which will create the window and run the render loop
+    // spawn worker thread (thread creates window and does rendering)
     rw->hThread = CreateThread(NULL, 0, RenderThreadProc, tp, 0, &rw->threadId);
-    if (!rw->hThread) 
+    if (!rw->hThread)
     {
-        if (rw && rw->hStopEvent) 
-        {
-            CloseHandle(rw->hStopEvent);
-            rw->hStopEvent = NULL;
-        }
+        SafeCloseHandle(rw->hStopEvent);
         delete rw;
         delete tp;
         return TRUE;
@@ -590,7 +646,7 @@ static void RunFull()
         LARGE_INTEGER now;
         QueryPerformanceCounter(&now);
         double dt = double(now.QuadPart - last.QuadPart) / double(g_PerfFreq.QuadPart);
-        last = now; 
+        last = now;
         total += dt;
         for (auto rw : g_Windows) RenderFrame(rw, (float)dt, (float)total);
         Sleep(8);
@@ -669,22 +725,22 @@ static void CreateSettingsControls(HWND dlg)
     wstring mst = L"Stars (max " + to_wstring(g_MaxStars) + L"):";
     wstring msp = L"Speed (max " + to_wstring(g_MaxSpeed) + L"):";
     HFONT hFont = CreateFontW(16, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, DEFAULT_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
-    
+
     HWND hColorLabel = CreateWindowExW(0, L"STATIC", mst.c_str(), WS_CHILD | WS_VISIBLE | SS_LEFT, 10, 10, 120, 18, dlg, NULL, g_hInst, NULL);
     HWND hColorEdit = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", NULL, WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_LEFT, 150, 8, 80, 20, dlg, (HMENU)CID_EDIT_STARS, g_hInst, NULL);
     HWND hSpeedLabel = CreateWindowExW(0, L"STATIC", msp.c_str(), WS_CHILD | WS_VISIBLE | SS_LEFT, 10, 40, 120, 18, dlg, NULL, g_hInst, NULL);
     HWND hSpeedEdit = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", NULL, WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_LEFT, 150, 38, 80, 20, dlg, (HMENU)CID_EDIT_SPEED, g_hInst, NULL);
     HWND hColorButton = CreateWindowExW(0, L"BUTTON", L"Pick color", WS_CHILD | WS_VISIBLE, 250, 8, 80, 24, dlg, (HMENU)CID_BUTTON_COLOR, g_hInst, NULL);
-    CreateWindowExW(0, L"STATIC", L"     ",  WS_CHILD | WS_VISIBLE | SS_SIMPLE | SS_BLACKFRAME, 250, 38, 80, 26, dlg, (HMENU)CID_LABEL_COLOR, g_hInst, NULL);
+    CreateWindowExW(0, L"STATIC", L"     ", WS_CHILD | WS_VISIBLE | SS_SIMPLE | SS_BLACKFRAME, 250, 38, 80, 26, dlg, (HMENU)CID_LABEL_COLOR, g_hInst, NULL);
     HWND hOkButton = CreateWindowExW(0, L"BUTTON", L"OK", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 80, 70, 80, 24, dlg, (HMENU)CID_OK, g_hInst, NULL);
     HWND hCancelButton = CreateWindowExW(0, L"BUTTON", L"Cancel", WS_CHILD | WS_VISIBLE | BS_PUSHBUTTON, 168, 70, 80, 24, dlg, (HMENU)CID_CANCEL, g_hInst, NULL);
-    
+
     SendMessageW(hColorLabel, WM_SETFONT, (WPARAM)hFont, TRUE);
     SendMessageW(hColorEdit, WM_SETFONT, (WPARAM)hFont, TRUE);
     SendMessageW(hSpeedLabel, WM_SETFONT, (WPARAM)hFont, TRUE);
     SendMessageW(hSpeedEdit, WM_SETFONT, (WPARAM)hFont, TRUE);
     SendMessageW(hColorButton, WM_SETFONT, (WPARAM)hFont, TRUE);
-    SendMessageW(hOkButton, WM_SETFONT, (WPARAM)hFont, TRUE); 
+    SendMessageW(hOkButton, WM_SETFONT, (WPARAM)hFont, TRUE);
     SendMessageW(hCancelButton, WM_SETFONT, (WPARAM)hFont, TRUE);
 }
 
@@ -723,11 +779,11 @@ LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPar
             cc.rgbResult = g_CurrentStarColor; // initial color
             cc.Flags = CC_FULLOPEN | CC_RGBINIT;
 
-            if (ChooseColor(&cc)) 
+            if (ChooseColor(&cc))
             {
-                // user picked a color — cc.rgbResult now contains the selection
+                // user picked a color � cc.rgbResult now contains the selection
                 g_CurrentStarColor = cc.rgbResult;
-				// Macro's to update RGB components inside the Colorpicker
+                // Macro's to update RGB components inside the Colorpicker
                 BYTE r = GetRValue(g_CurrentStarColor), g = GetGValue(g_CurrentStarColor), b = GetBValue(g_CurrentStarColor);
                 // save back the updated custom colors
                 vector<COLORREF> toSave(16);
@@ -735,7 +791,7 @@ LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPar
                 {
                     toSave[i] = g_CustomColors[i];
                 }
-				SaveCustomColors(toSave);
+                SaveCustomColors(toSave);
                 if (g_hBrushColor) DeleteObject(g_hBrushColor);
                 g_hBrushColor = CreateSolidBrush(g_CurrentStarColor);
                 InvalidateRect(hColorLabel, NULL, TRUE);
@@ -772,7 +828,7 @@ LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPar
         HDC hdcStatic = (HDC)wParam;
         HWND hStatic = (HWND)lParam;
 
-        if (GetDlgCtrlID(hStatic) == CID_LABEL_COLOR) 
+        if (GetDlgCtrlID(hStatic) == CID_LABEL_COLOR)
         {
             SetBkMode(hdcStatic, OPAQUE);
             SetBkColor(hdcStatic, g_CurrentStarColor);
@@ -790,9 +846,9 @@ LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPar
             SetForegroundWindow(owner);
             SetFocus(owner);
 
-			// Ensure Z-order of Parent Settings Dialog
+            // Ensure Z-order of Parent Settings Dialog
             SetWindowPos(owner, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
-            
+
             if (g_hBrushColor)
             {
                 DeleteObject(g_hBrushColor);
@@ -875,17 +931,16 @@ static void StopAllThreadsAndCleanup()
         if (rw->hThread) 
         {
             WaitForSingleObject(rw->hThread, 2000);
-            CloseHandle(rw->hThread);
+            SafeCloseHandle(rw->hThread);
         }
-        CloseHandle(rw->hStopEvent);
+        SafeCloseHandle(rw->hStopEvent);
         // RenderWindow memory belongs to us; windows are destroyed inside threads
         delete rw;
     }
     g_Windows.clear();
 }
 
-// Entry point
-int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int) 
+int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int)
 {
     g_hInst = hInstance;
     LoadSettings();
@@ -902,7 +957,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int)
     if (mode == 'c')
     {
         ShowSettingsModalPopup(argH);
-        LocalFree(argv); 
+        LocalFree(argv);
         return 0;
     }
     if (mode == 'p')
@@ -910,7 +965,7 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE, PWSTR, int)
         if (argH)
         {
             RunPreview(argH);
-            LocalFree(argv); 
+            LocalFree(argv);
             return 0;
         }
     }
