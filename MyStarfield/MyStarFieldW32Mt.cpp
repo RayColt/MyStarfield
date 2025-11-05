@@ -756,112 +756,112 @@ LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPar
     g_hBrushColor = CreateSolidBrush(g_CurrentStarColor);
     switch (msg)
     {
-    case WM_CREATE:
-    {
-        CreateSettingsControls(hWnd);
-        SetDlgItemInt(hWnd, CID_EDIT_STARS, g_StarCount, FALSE);
-        SetDlgItemInt(hWnd, CID_EDIT_SPEED, g_Speed, FALSE);
-        return 0;
-    }
-    case WM_COMMAND:
-    {
-        int id = LOWORD(wParam);
-        if (id == CID_BUTTON_COLOR)
+        case WM_CREATE:
         {
-            vector<COLORREF> persisted;
-            LoadCustomColors(persisted);
-            for (int i = 0; i < 16; ++i) g_CustomColors[i] = persisted[i];
-
-            CHOOSECOLOR cc = {};
-            ZeroMemory(&cc, sizeof(cc));
-            cc.lStructSize = sizeof(cc);
-            cc.hwndOwner = hWnd; // parent window handle
-            cc.lpCustColors = g_CustomColors;
-            cc.rgbResult = g_CurrentStarColor; // initial color
-            cc.Flags = CC_FULLOPEN | CC_RGBINIT;
-
-            if (ChooseColor(&cc))
+            CreateSettingsControls(hWnd);
+            SetDlgItemInt(hWnd, CID_EDIT_STARS, g_StarCount, FALSE);
+            SetDlgItemInt(hWnd, CID_EDIT_SPEED, g_Speed, FALSE);
+            return 0;
+        }
+        case WM_COMMAND:
+        {
+            int id = LOWORD(wParam);
+            if (id == CID_BUTTON_COLOR)
             {
-                // user picked a color — cc.rgbResult now contains the selection
-                g_CurrentStarColor = cc.rgbResult;
-                // Macro's to update RGB components inside the Colorpicker
-                BYTE r = GetRValue(g_CurrentStarColor), g = GetGValue(g_CurrentStarColor), b = GetBValue(g_CurrentStarColor);
-                // save back the updated custom colors
-                vector<COLORREF> toSave(16);
-                for (int i = 0; i < 16; ++i)
+                vector<COLORREF> persisted;
+                LoadCustomColors(persisted);
+                for (int i = 0; i < 16; ++i) g_CustomColors[i] = persisted[i];
+
+                CHOOSECOLOR cc = {};
+                ZeroMemory(&cc, sizeof(cc));
+                cc.lStructSize = sizeof(cc);
+                cc.hwndOwner = hWnd; // parent window handle
+                cc.lpCustColors = g_CustomColors;
+                cc.rgbResult = g_CurrentStarColor; // initial color
+                cc.Flags = CC_FULLOPEN | CC_RGBINIT;
+
+                if (ChooseColor(&cc))
                 {
-                    toSave[i] = g_CustomColors[i];
+                    // user picked a color — cc.rgbResult now contains the selection
+                    g_CurrentStarColor = cc.rgbResult;
+                    // Macro's to update RGB components inside the Colorpicker
+                    BYTE r = GetRValue(g_CurrentStarColor), g = GetGValue(g_CurrentStarColor), b = GetBValue(g_CurrentStarColor);
+                    // save back the updated custom colors
+                    vector<COLORREF> toSave(16);
+                    for (int i = 0; i < 16; ++i)
+                    {
+                        toSave[i] = g_CustomColors[i];
+                    }
+                    SaveCustomColors(toSave);
+                    if (g_hBrushColor) DeleteObject(g_hBrushColor);
+                    g_hBrushColor = CreateSolidBrush(g_CurrentStarColor);
+                    InvalidateRect(hColorLabel, NULL, TRUE);
                 }
-                SaveCustomColors(toSave);
-                if (g_hBrushColor) DeleteObject(g_hBrushColor);
-                g_hBrushColor = CreateSolidBrush(g_CurrentStarColor);
-                InvalidateRect(hColorLabel, NULL, TRUE);
+                return 0;
             }
-            return 0;
-        }
-        else if (id == CID_OK)
-        {
-            BOOL ok;
-            int stars = GetDlgItemInt(hWnd, CID_EDIT_STARS, &ok, FALSE);
-            if (!ok) stars = g_StarCount;
-            else stars = (int)fmax(1, fmin(g_MaxStars, stars));
-
-            int speed = GetDlgItemInt(hWnd, CID_EDIT_SPEED, &ok, FALSE);
-            if (!ok) speed = g_Speed;
-            else speed = (int)fmax(1, fmin(g_MaxSpeed, speed));
-
-            g_StarCount = stars;
-            g_Speed = speed;
-
-            SaveSettings();
-            DestroyWindow(hWnd);
-            return 0;
-        }
-        else if (id == CID_CANCEL)
-        {
-            DestroyWindow(hWnd);
-            return 0;
-        }
-        break;
-    }
-    case WM_CTLCOLORSTATIC:
-    {
-        HDC hdcStatic = (HDC)wParam;
-        HWND hStatic = (HWND)lParam;
-
-        if (GetDlgCtrlID(hStatic) == CID_LABEL_COLOR)
-        {
-            SetBkMode(hdcStatic, OPAQUE);
-            SetBkColor(hdcStatic, g_CurrentStarColor);
-            return (INT_PTR)g_hBrushColor;
-        }
-        break;
-    }
-    case WM_DESTROY:
-    {
-        if (owner && IsWindow(owner))
-        {
-            EnableWindow(owner, TRUE);
-            BringWindowToTop(owner);
-            SetActiveWindow(owner);
-            SetForegroundWindow(owner);
-            SetFocus(owner);
-
-            // Ensure Z-order of Parent Settings Dialog
-            SetWindowPos(owner, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
-
-            if (g_hBrushColor)
+            else if (id == CID_OK)
             {
-                DeleteObject(g_hBrushColor);
-                g_hBrushColor = NULL;
+                BOOL ok;
+                int stars = GetDlgItemInt(hWnd, CID_EDIT_STARS, &ok, FALSE);
+                if (!ok) stars = g_StarCount;
+                else stars = (int)fmax(1, fmin(g_MaxStars, stars));
+
+                int speed = GetDlgItemInt(hWnd, CID_EDIT_SPEED, &ok, FALSE);
+                if (!ok) speed = g_Speed;
+                else speed = (int)fmax(1, fmin(g_MaxSpeed, speed));
+
+                g_StarCount = stars;
+                g_Speed = speed;
+
+                SaveSettings();
+                DestroyWindow(hWnd);
+                return 0;
             }
+            else if (id == CID_CANCEL)
+            {
+                DestroyWindow(hWnd);
+                return 0;
+            }
+            break;
+        }
+        case WM_CTLCOLORSTATIC:
+        {
+            HDC hdcStatic = (HDC)wParam;
+            HWND hStatic = (HWND)lParam;
+
+            if (GetDlgCtrlID(hStatic) == CID_LABEL_COLOR)
+            {
+                SetBkMode(hdcStatic, OPAQUE);
+                SetBkColor(hdcStatic, g_CurrentStarColor);
+                return (INT_PTR)g_hBrushColor;
+            }
+            break;
+        }
+        case WM_DESTROY:
+        {
+            if (owner && IsWindow(owner))
+            {
+                EnableWindow(owner, TRUE);
+                BringWindowToTop(owner);
+                SetActiveWindow(owner);
+                SetForegroundWindow(owner);
+                SetFocus(owner);
+
+                // Ensure Z-order of Parent Settings Dialog
+                SetWindowPos(owner, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
+
+                if (g_hBrushColor)
+                {
+                    DeleteObject(g_hBrushColor);
+                    g_hBrushColor = NULL;
+                }
+            }
+            return 0;
+        }
+        default:
+            return DefWindowProcW(hWnd, msg, wParam, lParam);
         }
         return 0;
-    }
-    default:
-        return DefWindowProcW(hWnd, msg, wParam, lParam);
-    }
-    return 0;
 }
 
 // Register settings class once
