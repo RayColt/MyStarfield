@@ -39,7 +39,6 @@ struct RenderWindow
     HANDLE hThread = NULL;        // worker thread handle
     DWORD  threadId = 0;          // thread id
     HANDLE hStopEvent = NULL;     // signal thread to stop (optional)
-
 };
 
 // ThreadParam

@@ -23,11 +23,41 @@ T clamp(T val, T minVal, T maxVal)
     return (val < minVal) ? minVal : (val > maxVal) ? maxVal : val;
 }
 
+// ---- Starfield rendering structures
+struct Star 
+{ 
+    float x, y, z, base, phase; 
+};
+
+struct RenderWindow
+{
+    HWND hwnd = NULL;
+    ID2D1Factory* factory = nullptr;
+    ID2D1HwndRenderTarget* rt = nullptr;
+    ID2D1SolidColorBrush* brush = nullptr;
+    vector<Star> stars;
+    RECT rc = {};
+    mt19937 rng;
+    bool isPreview = false;
+};
+
+static HINSTANCE g_hInst = NULL;
+static vector<RenderWindow*> g_windows;
+static bool g_Running = true;
+
+// Input filtering
+static LARGE_INTEGER g_PerfFreq;
+static LARGE_INTEGER g_StartCounter;
+static double g_InputDebounceSeconds = 0.66;
+static POINT g_StartMouse = { 0,0 };
+static bool g_StartMouseInit = false;
+static const int g_MouseMoveThreshold = 12; // pixels
+
 // ---- Config / registry keys
 static LPCWSTR REG_KEY = L"Software\\MyStarfieldD2D1";
 static LPCWSTR REG_STARS = L"StarCount";
 static LPCWSTR REG_SPEED = L"SpeedPercent";
-static LPCWSTR REG_TWINKLE = L"TwinklePercent";// TODO: implement twinkle setting in UI
+static LPCWSTR REG_TWINKLE = L"TwinklePercent";// TODO: implement twinkle setting in UI?
 static LPCWSTR REG_COLOR = L"Color";
 static LPCWSTR REG_CCOLORS = L"Custom Colors";
 static COLORREF g_CustomColors[16];
@@ -108,32 +138,6 @@ static void SaveCustomColors(const vector<COLORREF>& colors)
     RegCloseKey(hKey);
 }
 
-// ---- Starfield rendering structures
-struct Star { float x, y, z, base, phase; };
-struct RenderWindow 
-{
-    HWND hwnd = NULL;
-    ID2D1Factory* factory = nullptr;
-    ID2D1HwndRenderTarget* rt = nullptr;
-    ID2D1SolidColorBrush* brush = nullptr;
-    vector<Star> stars;
-    RECT rc = {};
-    mt19937 rng;
-    bool isPreview = false;
-};
-
-static HINSTANCE g_hInst = NULL;
-static vector<RenderWindow*> g_windows;
-static bool g_Running = true;
-
-// Input filtering
-static LARGE_INTEGER g_PerfFreq;
-static LARGE_INTEGER g_StartCounter;
-static double g_InputDebounceSeconds = 0.66;
-static POINT g_StartMouse = { 0,0 };
-static bool g_StartMouseInit = false;
-static const int g_MouseMoveThreshold = 12; // pixels
-
 // Simple arg parsing
 static void ParseArgs(int argc, wchar_t** argv, wchar_t& modeOut, HWND& hwndOut)
 {
@@ -180,6 +184,7 @@ static void InitStars(RenderWindow* rw)
     uniform_real_distribution<float> uph(0.0f, 6.28318530718f);
     for (int i = 0; i < g_StarCount; ++i) rw->stars.push_back({ ux(rw->rng), uy(rw->rng), uz(rw->rng), ub(rw->rng), uph(rw->rng) });
 }
+
 static HRESULT CreateRT(RenderWindow* rw) 
 {
     if (!rw->factory) return E_FAIL;
@@ -235,8 +240,10 @@ static void RenderFrame(RenderWindow* rw, float dt, float totalTime)
     if (hr == D2DERR_RECREATE_TARGET) 
     { 
         if (rw->rt) 
-        { rw->rt->Release(); 
-        rw->rt = nullptr; } 
+        { 
+            rw->rt->Release(); 
+            rw->rt = nullptr; 
+        } 
         CreateRT(rw); 
     }
 }
@@ -255,55 +262,56 @@ static bool ForegroundIsOurWindow()
 LRESULT CALLBACK FullWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) 
 {
     RenderWindow* rw = (RenderWindow*)GetWindowLongPtrW(hWnd, GWLP_USERDATA);
-    switch (msg) {
-    case WM_CREATE: 
-        g_StartMouseInit = false; 
-        return 0;
-    case WM_SIZE:
-        if (rw) 
-        { 
-            GetClientRect(hWnd, &rw->rc); 
-            if (rw->rt) 
-            { 
-                rw->rt->Release(); 
-                rw->rt = nullptr; 
-            } 
-            CreateRT(rw); 
-            g_StartMouseInit = false; 
-        }
-        return 0;
-    case WM_KEYDOWN:
-    case WM_LBUTTONDOWN:
-    case WM_RBUTTONDOWN:
-    case WM_MBUTTONDOWN:
-    case WM_XBUTTONDOWN:
-    case WM_MOUSEMOVE:
+    switch (msg) 
     {
-        LARGE_INTEGER now;
-        QueryPerformanceCounter(&now);
-        double seconds = double(now.QuadPart - g_StartCounter.QuadPart) / double(g_PerfFreq.QuadPart);
-        if (seconds < g_InputDebounceSeconds) { return 0; }
-        if (!ForegroundIsOurWindow()) { return 0; }
-        if (msg == WM_MOUSEMOVE)
-        {
-            POINT cur; GetCursorPos(&cur);
-            if (!g_StartMouseInit)
-            {
-                g_StartMouse = cur;
-                g_StartMouseInit = true;
-                return 0;
+        case WM_CREATE: 
+            g_StartMouseInit = false; 
+            return 0;
+        case WM_SIZE:
+            if (rw) 
+            { 
+                GetClientRect(hWnd, &rw->rc); 
+                if (rw->rt) 
+                { 
+                    rw->rt->Release(); 
+                    rw->rt = nullptr; 
+                } 
+                CreateRT(rw); 
+                g_StartMouseInit = false; 
             }
-            int dx = abs(cur.x - g_StartMouse.x), dy = abs(cur.y - g_StartMouse.y);
-            if (dx < g_MouseMoveThreshold && dy < g_MouseMoveThreshold) { return 0; }
+            return 0;
+        case WM_KEYDOWN:
+        case WM_LBUTTONDOWN:
+        case WM_RBUTTONDOWN:
+        case WM_MBUTTONDOWN:
+        case WM_XBUTTONDOWN:
+        case WM_MOUSEMOVE:
+        {
+            LARGE_INTEGER now;
+            QueryPerformanceCounter(&now);
+            double seconds = double(now.QuadPart - g_StartCounter.QuadPart) / double(g_PerfFreq.QuadPart);
+            if (seconds < g_InputDebounceSeconds) { return 0; }
+            if (!ForegroundIsOurWindow()) { return 0; }
+            if (msg == WM_MOUSEMOVE)
+            {
+                POINT cur; GetCursorPos(&cur);
+                if (!g_StartMouseInit)
+                {
+                    g_StartMouse = cur;
+                    g_StartMouseInit = true;
+                    return 0;
+                }
+                int dx = abs(cur.x - g_StartMouse.x), dy = abs(cur.y - g_StartMouse.y);
+                if (dx < g_MouseMoveThreshold && dy < g_MouseMoveThreshold) { return 0; }
+            }
+            g_Running = false;
+            PostQuitMessage(0);
+            return 0;
         }
-        g_Running = false;
-        PostQuitMessage(0);
-        return 0;
-    }
-    case WM_DESTROY: 
-        return 0;
-    default: 
-        return DefWindowProcW(hWnd, msg, wParam, lParam);
+        case WM_DESTROY: 
+            return 0;
+        default: 
+            return DefWindowProcW(hWnd, msg, wParam, lParam);
     }
 }
 
@@ -356,9 +364,15 @@ static void RunFull()
     EnumDisplayMonitors(NULL, NULL, MonEnumProc, 0);
     QueryPerformanceFrequency(&g_PerfFreq);
     QueryPerformanceCounter(&g_StartCounter);
-    POINT p; GetCursorPos(&p); g_StartMouse = p; g_StartMouseInit = true;
-    LARGE_INTEGER last; QueryPerformanceCounter(&last);
-    double total = 0.0; MSG msg;
+    POINT p; 
+    GetCursorPos(&p);
+    g_StartMouse = p; 
+    g_StartMouseInit = true;
+    LARGE_INTEGER last; 
+    QueryPerformanceCounter(&last);
+    double total = 0.0; 
+    MSG msg;
+
     while (g_Running) 
     {
         while (PeekMessageW(&msg, NULL, 0, 0, PM_REMOVE))
@@ -424,7 +438,8 @@ static int RunPreview(HWND parent)
         {
             if (msg.message == WM_QUIT) 
             {
-                DestroyWindow(child); break; 
+                DestroyWindow(child); 
+                break; 
             }
             TranslateMessage(&msg); 
             DispatchMessage(&msg);
@@ -432,7 +447,8 @@ static int RunPreview(HWND parent)
         LARGE_INTEGER now; 
         QueryPerformanceCounter(&now);
         double dt = double(now.QuadPart - last.QuadPart) / double(g_PerfFreq.QuadPart);
-        last = now; total += dt;
+        last = now; 
+        total += dt;
         RenderFrame(rw, (float)dt, (float)total);
         Sleep(15);
     }
@@ -485,111 +501,111 @@ LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPar
     g_hBrushColor = CreateSolidBrush(g_CurrentStarColor);
     switch (msg)
     {
-    case WM_CREATE:
-    {
-        CreateSettingsControls(hWnd);
-        SetDlgItemInt(hWnd, CID_EDIT_STARS, g_StarCount, FALSE);
-        SetDlgItemInt(hWnd, CID_EDIT_SPEED, g_Speed, FALSE);
-        return 0;
-    }
-    case WM_COMMAND:
-    {
-        int id = LOWORD(wParam);
-        if (id == CID_BUTTON_COLOR)
+        case WM_CREATE:
         {
-            vector<COLORREF> persisted;
-            LoadCustomColors(persisted);
-            for (int i = 0; i < 16; ++i) g_CustomColors[i] = persisted[i];
-
-            CHOOSECOLOR cc = {};
-            ZeroMemory(&cc, sizeof(cc));
-            cc.lStructSize = sizeof(cc);
-            cc.hwndOwner = hWnd; // parent window handle
-            cc.lpCustColors = g_CustomColors;
-            cc.rgbResult = g_CurrentStarColor; // initial color
-            cc.Flags = CC_FULLOPEN | CC_RGBINIT;
-
-            if (ChooseColor(&cc))
+            CreateSettingsControls(hWnd);
+            SetDlgItemInt(hWnd, CID_EDIT_STARS, g_StarCount, FALSE);
+            SetDlgItemInt(hWnd, CID_EDIT_SPEED, g_Speed, FALSE);
+            return 0;
+        }
+        case WM_COMMAND:
+        {
+            int id = LOWORD(wParam);
+            if (id == CID_BUTTON_COLOR)
             {
-                // user picked a color — cc.rgbResult now contains the selection
-                g_CurrentStarColor = cc.rgbResult;
-                // Macro's to update RGB components inside the Colorpicker
-                BYTE r = GetRValue(g_CurrentStarColor), g = GetGValue(g_CurrentStarColor), b = GetBValue(g_CurrentStarColor);
-                // save back the updated custom colors
-                vector<COLORREF> toSave(16);
-                for (int i = 0; i < 16; ++i)
+                vector<COLORREF> persisted;
+                LoadCustomColors(persisted);
+                for (int i = 0; i < 16; ++i) g_CustomColors[i] = persisted[i];
+
+                CHOOSECOLOR cc = {};
+                ZeroMemory(&cc, sizeof(cc));
+                cc.lStructSize = sizeof(cc);
+                cc.hwndOwner = hWnd; // parent window handle
+                cc.lpCustColors = g_CustomColors;
+                cc.rgbResult = g_CurrentStarColor; // initial color
+                cc.Flags = CC_FULLOPEN | CC_RGBINIT;
+
+                if (ChooseColor(&cc))
                 {
-                    toSave[i] = g_CustomColors[i];
+                    // user picked a color — cc.rgbResult now contains the selection
+                    g_CurrentStarColor = cc.rgbResult;
+                    // Macro's to update RGB components inside the Colorpicker
+                    BYTE r = GetRValue(g_CurrentStarColor), g = GetGValue(g_CurrentStarColor), b = GetBValue(g_CurrentStarColor);
+                    // save back the updated custom colors
+                    vector<COLORREF> toSave(16);
+                    for (int i = 0; i < 16; ++i)
+                    {
+                        toSave[i] = g_CustomColors[i];
+                    }
+                    SaveCustomColors(toSave);
+                    if (g_hBrushColor) DeleteObject(g_hBrushColor);
+                    g_hBrushColor = CreateSolidBrush(g_CurrentStarColor);
+                    InvalidateRect(hColorLabel, NULL, TRUE);
                 }
-                SaveCustomColors(toSave);
-                if (g_hBrushColor) DeleteObject(g_hBrushColor);
-                g_hBrushColor = CreateSolidBrush(g_CurrentStarColor);
-                InvalidateRect(hColorLabel, NULL, TRUE);
+                return 0;
             }
-            return 0;
-        }
-        else if (id == CID_OK)
-        {
-            BOOL ok;
-            int stars = GetDlgItemInt(hWnd, CID_EDIT_STARS, &ok, FALSE);
-            if (!ok) stars = g_StarCount;
-            else stars = (int)fmax(1, fmin(g_MaxStars, stars));
-
-            int speed = GetDlgItemInt(hWnd, CID_EDIT_SPEED, &ok, FALSE);
-            if (!ok) speed = g_Speed;
-            else speed = (int)fmax(1, fmin(g_MaxSpeed, speed));
-
-            g_StarCount = stars;
-            g_Speed = speed;
-
-            SaveSettings();
-            DestroyWindow(hWnd);
-            return 0;
-        }
-        else if (id == CID_CANCEL)
-        {
-            DestroyWindow(hWnd);
-            return 0;
-        }
-        break;
-    }
-    case WM_CTLCOLORSTATIC:
-    {
-        HDC hdcStatic = (HDC)wParam;
-        HWND hStatic = (HWND)lParam;
-
-        if (GetDlgCtrlID(hStatic) == CID_LABEL_COLOR)
-        {
-            SetBkMode(hdcStatic, OPAQUE);
-            SetBkColor(hdcStatic, g_CurrentStarColor);
-            return (INT_PTR)g_hBrushColor;
-        }
-        break;
-    }
-    case WM_DESTROY:
-    {
-        if (owner && IsWindow(owner))
-        {
-            EnableWindow(owner, TRUE);
-            BringWindowToTop(owner);
-            SetActiveWindow(owner);
-            SetForegroundWindow(owner);
-            SetFocus(owner);
-
-            // Ensure Z-order of Parent Settings Dialog
-            SetWindowPos(owner, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
-
-            if (g_hBrushColor)
+            else if (id == CID_OK)
             {
-                DeleteObject(g_hBrushColor);
-                g_hBrushColor = NULL;
+                BOOL ok;
+                int stars = GetDlgItemInt(hWnd, CID_EDIT_STARS, &ok, FALSE);
+                if (!ok) stars = g_StarCount;
+                else stars = (int)fmax(1, fmin(g_MaxStars, stars));
+
+                int speed = GetDlgItemInt(hWnd, CID_EDIT_SPEED, &ok, FALSE);
+                if (!ok) speed = g_Speed;
+                else speed = (int)fmax(1, fmin(g_MaxSpeed, speed));
+
+                g_StarCount = stars;
+                g_Speed = speed;
+
+                SaveSettings();
+                DestroyWindow(hWnd);
+                return 0;
             }
+            else if (id == CID_CANCEL)
+            {
+                DestroyWindow(hWnd);
+                return 0;
+            }
+            break;
         }
-        return 0;
-    }
-    default:
-        return DefWindowProcW(hWnd, msg, wParam, lParam);
-    }
+        case WM_CTLCOLORSTATIC:
+        {
+            HDC hdcStatic = (HDC)wParam;
+            HWND hStatic = (HWND)lParam;
+
+            if (GetDlgCtrlID(hStatic) == CID_LABEL_COLOR)
+            {
+                SetBkMode(hdcStatic, OPAQUE);
+                SetBkColor(hdcStatic, g_CurrentStarColor);
+                return (INT_PTR)g_hBrushColor;
+            }
+            break;
+        }
+        case WM_DESTROY:
+        {
+            if (owner && IsWindow(owner))
+            {
+                EnableWindow(owner, TRUE);
+                BringWindowToTop(owner);
+                SetActiveWindow(owner);
+                SetForegroundWindow(owner);
+                SetFocus(owner);
+
+                // Ensure Z-order of Parent Settings Dialog
+                SetWindowPos(owner, HWND_TOP, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW);
+
+                if (g_hBrushColor)
+                {
+                    DeleteObject(g_hBrushColor);
+                    g_hBrushColor = NULL;
+                }
+            }
+            return 0;
+        }
+        default:
+            return DefWindowProcW(hWnd, msg, wParam, lParam);
+        }
     return 0;
 }
 
