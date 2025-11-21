@@ -349,11 +349,14 @@ static void RenderFrame(RenderWindow* rw, float dt, float totalTime)
         }
         // skip if offscreen
         if (px + psz < 0 || px - psz > w || py + psz < 0 || py - psz > h) continue;
+        
+        // Ellipse part, for >= 0.5 px stars  :)
         HBRUSH oldBrush = nullptr;
         if (brushes[bucket])
         {
             int ix = (int)lroundf(px);
             int iy = (int)lroundf(py);
+            
             if (psz <= 1)
             {
                 // 1-pixel star: avoid creating a brush per star, used SetPixelV for speed
@@ -367,7 +370,7 @@ static void RenderFrame(RenderWindow* rw, float dt, float totalTime)
                 SelectObject(rw->backHdc, oldBrush);
             }
         }
-        /* Old if (brushes[bucket]){}/Ellipse part, for >= 2px stars
+        /* Ellipse part, for >= 1px stars
         HBRUSH oldBrush = (HBRUSH)SelectObject(rw->backHdc, brushes[bucket]);
         Ellipse(rw->backHdc,
             (int)floorf(px - psz), (int)floorf(py - psz),
