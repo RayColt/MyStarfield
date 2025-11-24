@@ -28,7 +28,7 @@
     <ResourceCompile Include="MyStarfield.rc" />
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="Direct2D-Dev\stars_d2d1.cpp" />
+    <ClCompile Include="MyStarFieldW32Mt.cpp" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <VCProjectVersion>17.0</VCProjectVersion>
