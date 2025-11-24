@@ -313,8 +313,7 @@ static void RenderFrame(RenderWindow* rw, float dt, float totalTime)
             s.x = (fx - 0.5f) * (float)w * 2.0f;
             s.y = (fy - 0.5f) * (float)h * 2.0f;
             s.z = fz * (Z_MAX - Z_MIN) + Z_MIN;
-            int jitterMax = max(1, g_Speed / 2 + 1);
-            s.speed = (float)g_Speed + float(rw->rng() % jitterMax);
+            s.speed = (float)g_Speed + ud01(rw->rng) * (float)g_Speed; // Vary speed slightly
         }
 
         // projection using small focal factor
@@ -370,7 +369,7 @@ static void RenderFrame(RenderWindow* rw, float dt, float totalTime)
                 SelectObject(rw->backHdc, oldBrush);
             }
         }
-        /* Ellipse part, for >= 1px stars
+        /* Ellipse part, for >= 2px stars
         HBRUSH oldBrush = (HBRUSH)SelectObject(rw->backHdc, brushes[bucket]);
         Ellipse(rw->backHdc,
             (int)floorf(px - psz), (int)floorf(py - psz),
