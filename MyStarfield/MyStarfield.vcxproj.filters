@@ -30,7 +30,7 @@
     </ResourceCompile>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="MyStarFieldW32Mt.cpp">
+    <ClCompile Include="Direct2D-Dev\stars_d2d1.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
