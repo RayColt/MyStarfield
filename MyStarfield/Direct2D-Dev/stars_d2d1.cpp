@@ -1,11 +1,12 @@
 #include <windows.h>
 #include <d2d1.h>
 #include <wincodec.h>
-#include <vector>
 #include <cmath>
 #include <cstdlib>
 #include <ctime>
 #include <random>
+#include <string>
+#include <vector>
 
 // --- Linker Directives (for Visual Studio) ---
 #pragma comment(lib, "d2d1.lib") 
@@ -14,9 +15,7 @@
 
 using namespace std;
 
-// Constants ---
-//const int g_StarCount = 1024;
-//const float g_StarSpeed = 12.0f;
+// Constants
 const float g_StarSize = 0.5f;
 // Defaults
 static int g_StarCount = 200;
@@ -67,6 +66,10 @@ struct RenderWindow
     mt19937 rng;
     bool isPreview = false;
 
+    // Direct2D per-window resources (owned by the thread that created the window)
+    ID2D1HwndRenderTarget* pRT = nullptr;
+    ID2D1SolidColorBrush* pBrush = nullptr;
+
     HANDLE hThread = NULL;        // worker thread handle
     DWORD  threadId = 0;          // thread id
     HANDLE hStopEvent = NULL;     // signal thread to stop (optional)
@@ -97,7 +100,7 @@ static bool g_StartMouseInit = false;
 static const int g_MouseMoveThreshold = 12; // pixels
 
 // Config / registry keys
-static LPCWSTR REG_KEY = L"Software\\MyStarfieldW32";
+static LPCWSTR REG_KEY = L"Software\\MyStarfieldD2d1";
 static LPCWSTR REG_STARS = L"StarCount";
 static LPCWSTR REG_SPEED = L"Speed";
 static LPCWSTR REG_COLOR = L"Color";
@@ -108,10 +111,6 @@ static COLORREF g_CustomColors[16];
 ID2D1Factory* pD2DFactory = nullptr;
 ID2D1HwndRenderTarget* pRT = nullptr;
 ID2D1SolidColorBrush* pWhiteBrush = nullptr;
-
-// --- Forward Declarations ---
-HRESULT CreateD2DResources(HWND hWnd);
-void DiscardD2DResources();
 
 // Registry helpers
 static int GetRegDWORD(LPCWSTR name, int def)
@@ -282,99 +281,103 @@ void InitializeStars(RenderWindow* rw)
         float fx = ud01(rw->rng);
         float fy = ud01(rw->rng);
         float fz = ud01(rw->rng);
-        rw->g_stars[i].x = fx / RAND_MAX * width - width / 2.0f;
-		rw->g_stars[i].y = fy / RAND_MAX * height - height / 2.0f;
-		rw->g_stars[i].z = fz / RAND_MAX * width;
-		rw->g_stars[i].speed = g_StarSpeed + ud01(rw->rng) * g_StarSpeed; // Vary speed slightly
+       // rw->g_stars[i].x = fx / RAND_MAX * width - width / 2.0f;
+		//rw->g_stars[i].y = fy / RAND_MAX * height - height / 2.0f;
+		//rw->g_stars[i].z = fz / RAND_MAX * width;
+		//rw->g_stars[i].speed = g_StarSpeed + ud01(rw->rng) * g_StarSpeed; // Vary speed slightly
+
+        rw->g_stars[i].x = (fx - 0.5f) * (float)width * 2.0f;
+        rw->g_stars[i].y = (fy - 0.5f) * (float)height * 2.0f;
+        rw->g_stars[i].z = fz * (float)width; // depth in screen space
+        rw->g_stars[i].speed = (float)g_StarSpeed + ud01(rw->rng) * (float)g_StarSpeed; // Vary speed slightly
+    
     }
 }
 
 /**
  * @brief Creates Direct2D factory, render target, and brushes.
  */
-HRESULT CreateD2DResources(HWND hWnd) 
+HRESULT CreateD2DResources(RenderWindow* rw)
 {
-    HRESULT hr = S_OK;
-    if (!pRT) 
-    {
-        // Get window dimensions
-        RECT rc;
-        GetClientRect(hWnd, &rc);
-        D2D1_SIZE_U size = D2D1::SizeU(rc.right, rc.bottom);
-        // Create a Direct2D render target
-        hr = pD2DFactory->CreateHwndRenderTarget(
-            D2D1::RenderTargetProperties(),
-            D2D1::HwndRenderTargetProperties(hWnd, size),
-            &pRT
-        );
-        if (SUCCEEDED(hr)) 
-        {
-            // Create a white brush for the stars
-            hr = pRT->CreateSolidColorBrush(D2D1::ColorF(D2D1::ColorF::White), &pWhiteBrush);
-        }
+    if (!rw) return E_POINTER;
+    if (rw->pRT) return S_OK; // already created for this window
+    if (!pD2DFactory) return E_FAIL; // factory must exist
 
-        if (SUCCEEDED(hr)) {
-            // Update global size and re-initialize stars
-            g_screenWidth = rc.right;
-            g_screenHeight = rc.bottom;
-            InitializeStars();
-        }
+    D2D1_SIZE_U size = D2D1::SizeU(max(1, rw->rc.right - rw->rc.left), max(1, rw->rc.bottom - rw->rc.top));
+    HRESULT hr = pD2DFactory->CreateHwndRenderTarget(
+        D2D1::RenderTargetProperties(),
+        D2D1::HwndRenderTargetProperties(rw->hwnd, size),
+        &rw->pRT
+    );
+    if (SUCCEEDED(hr))
+    {
+        hr = rw->pRT->CreateSolidColorBrush(D2D1::ColorF(D2D1::ColorF::White), &rw->pBrush);
+    }
+    if (SUCCEEDED(hr))
+    {
+        // Initialize stars once the render-target exists
+        InitializeStars(rw);
     }
     return hr;
 }
 
-/**
- * @brief Releases Direct2D resources.
- */
-void DiscardD2DResources() 
+// ----- Per-window discard D2D resources -----
+void DiscardD2DResources(RenderWindow* rw)
 {
-    // Release COM objects
-    // Note: pRT needs to be released first, as it holds a reference to pWhiteBrush
-    SafeRelease(&pRT);
-    SafeRelease(&pWhiteBrush);
+    if (!rw) return;
+    SafeRelease(&rw->pBrush);
+    SafeRelease(&rw->pRT);
 }
 
+// TODO: howto add backbuffer implementation with D2D1?
 /**
  * @brief Updates star positions and renders the starfield.
  * * @param hWnd The handle to the window (used for InvalidateRect).
  */
-void RenderFrame(HWND hWnd) 
+void RenderFrame(RenderWindow* rw)
 {
-    HRESULT hr = CreateD2DResources(hWnd);
+    if (!rw || !rw->backHdc) return;
+    HRESULT hr = CreateD2DResources(rw);
 
     if (SUCCEEDED(hr)) 
     {
         pRT->BeginDraw();
 
-        // --- Clear the screen (ctx.fillStyle = "black"; ctx.fillRect) ---
+        // Clear the screen (ctx.fillStyle = "black"; ctx.fillRect)
         // Direct2D clears to the specified color.
         pRT->Clear(D2D1::ColorF(D2D1::ColorF::Black));
-        for (auto& star : g_stars) 
+        RECT r = rw->rc;
+        int width = max(1, r.right - r.left);
+        int height = max(1, r.bottom - r.top);
+        uniform_real_distribution<float> ud01(0.0f, 1.0f);
+        for (auto& star : rw->g_stars) 
         {
-            star.z -= STAR_SPEED;
+            star.z -= g_StarSpeed * 0.05f; // was star.z -= g_StarSpeed scale down for smoother speeds
+            float fx = ud01(rw->rng);
+            float fy = ud01(rw->rng);
+            float fz = ud01(rw->rng);
 
-            if (star.z <= 0) 
+            if (star.z <= 0.1f) // was 0
             {
-                star.z = (float)g_screenWidth;
-                // Reset x/y when wrapping z
-                star.x = (float)std::rand() / RAND_MAX * g_screenWidth - g_screenWidth / 2.0f;
-                star.y = (float)std::rand() / RAND_MAX * g_screenHeight - g_screenHeight / 2.0f;
+                star.x = (fx - 0.5f) * (float)width * 2.0f;
+                star.y = (fy - 0.5f) * (float)height * 2.0f;
+                //star.z = fz * (float)width; // depth in screen space
+                star.z = fz * (float)width + 1.0f;
+                star.speed = (float)g_StarSpeed + ud01(rw->rng) * (float)g_StarSpeed; // Vary speed slightly
+
             }
 
             float k = 1024.0f / star.z;
 
             // Perspective Projection:
-            float px = star.x * k + g_screenWidth / 2.0f;
-            float py = star.y * k + g_screenHeight / 2.0f;
+            float px = star.x * k + width / 2.0f;
+            float py = star.y * k + height / 2.0f;
 
             // Check if star is on screen (clipping)
-            if (px >= 0 && px < g_screenWidth && py >= 0 && py < g_screenHeight) 
+            if (px >= 0 && px < width && py >= 0 && py < height)
             {
-               // float size = (1.0f - star.z / g_screenWidth) * 1.0f;
-                //if (size < 1.0f) size = 1.0f; // Minimum size of 1 pixel
-               // size = 0.5;
                 // Draw the star (ctx.fillRect(px, py, size, size))
-                D2D1_RECT_F starRect = D2D1::RectF(px, py, px + STAR_SIZE, py + STAR_SIZE);
+                D2D1_RECT_F starRect = D2D1::RectF(px, py, px + g_StarSize, py + g_StarSize);
                 pRT->FillRectangle(&starRect, pWhiteBrush);
             }
         }
@@ -390,84 +393,157 @@ void RenderFrame(HWND hWnd)
 
     // Trigger next redraw (replaces requestAnimationFrame)
     // The WM_TIMER approach is a common, simple substitute for rAF in Win32
-    SetTimer(hWnd, 1, 16, NULL); // Aim for ~60 FPS (16ms)
+    SetTimer(rw->hwnd, 1, 16, NULL); // Aim for ~60 FPS (16ms)
 }
-//todo:
-// --- Standard Win32 Window Procedure ---
-LRESULT CALLBACK WndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) 
+
+void RenderFrame(RenderWindow* rw)
 {
-    switch (message) 
+    if (!rw) return;
+
+    // Create D2D resources for this window (owned by this thread)
+    HRESULT hr = CreateD2DResources(rw);
+    if (FAILED(hr)) return;
+
+    ID2D1HwndRenderTarget* rt = rw->pRT;
+    ID2D1SolidColorBrush* brush = rw->pBrush;
+    if (!rt || !brush) return;
+
+    rt->BeginDraw();
+    rt->Clear(D2D1::ColorF(D2D1::ColorF::Black));
+
+    RECT r = rw->rc;
+    int width = max(1, r.right - r.left);
+    int height = max(1, r.bottom - r.top);
+
+    // Update and draw stars (simple fixed-step movement; you can add dt later)
+    for (auto& star : rw->g_stars)
     {
-    case WM_CREATE:
-        // Create a Direct2D factory with multithread support
-        D2D1_FACTORY_OPTIONS options = {};
-        ID2D1Factory* pFactory = nullptr;
-       // HRESULT hr = D2D1CreateFactory(D2D1_FACTORY_TYPE_MULTI_THREADED, __uuidof(ID2D1Factory),
-       //     &options, &d2dFactory);
-        if (FAILED(D2D1CreateFactory(D2D1_FACTORY_TYPE_MULTI_THREADED, __uuidof(ID2D1Factory), 
-            &options, reinterpret_cast<void**>(&pFactory))))
+        star.z -= star.speed * 0.05f; // scale down for smoother speeds
+
+        if (star.z <= 0.1f)
         {
-			return -1; // Fail window creation
+            // respawn
+            uniform_real_distribution<float> ud01(0.0f, 1.0f);
+            star.x = (ud01(rw->rng) - 0.5f) * (float)width * 2.0f;
+            star.y = (ud01(rw->rng) - 0.5f) * (float)height * 2.0f;
+            star.z = ud01(rw->rng) * (float)width + 1.0f;
+            star.speed = (float)g_StarSpeed + ud01(rw->rng) * (float)g_StarSpeed;
         }
 
+        // Perspective projection
+        float k = 1024.0f / max(0.0001f, star.z);
+        float px = star.x * k + width * 0.5f;
+        float py = star.y * k + height * 0.5f;
 
-        // Initialize Direct2D factory
-        //if (FAILED(D2D1CreateFactory(D2D1_FACTORY_TYPE_SINGLE_THREADED, &pD2DFactory))) 
-        //{
-        //    return -1; // Fail window creation
-        //}
-        
-        // Seed random number generator
-        std::srand(static_cast<unsigned int>(time(nullptr)));
-        // Start the timer for the animation loop
-        SetTimer(hWnd, 1, 16, NULL); // Timer ID 1, 16ms delay (~60 FPS)
-        return 0;
-
-    case WM_SIZE: 
-    {
-        // Handle resizing (similar to window.addEventListener("resize", resize))
-        UINT width = LOWORD(lParam);
-        UINT height = HIWORD(lParam);
-        if (pRT) 
+        if (px >= 0 && px < width && py >= 0 && py < height)
         {
-            HRESULT hr = pRT->Resize(D2D1::SizeU(width, height));
-            if (SUCCEEDED(hr)) 
-            {
-                g_screenWidth = width;
-                g_screenHeight = height;
-                InitializeStars(); // Re-initialize stars on resize
-            }
-            else
-            {
-                DiscardD2DResources();
-            }
+            D2D1_RECT_F starRect = D2D1::RectF(px, py, px + g_StarSize, py + g_StarSize);
+            rt->FillRectangle(&starRect, brush);
         }
-        return 0;
     }
 
-    case WM_PAINT:
-        // Validate rect before drawing
-        AnimateAndRender(hWnd);
-        ValidateRect(hWnd, NULL);
-        return 0;
-
-    case WM_TIMER:
-        // When the timer fires, redraw the window
-        if (wParam == 1) 
-        { // Check for our timer ID
-            InvalidateRect(hWnd, NULL, FALSE); // Forces WM_PAINT without erasing background
-        }
-        return 0;
-
-    case WM_DESTROY:
-        // Clean up resources
-        KillTimer(hWnd, 1);
-        DiscardD2DResources();
-        SafeRelease(&pD2DFactory);
-        PostQuitMessage(0);
-        return 0;
+    hr = rt->EndDraw();
+    if (hr == D2DERR_RECREATE_TARGET)
+    {
+        // GPU/device loss or driver change; drop per-window resources so they will be recreated
+        DiscardD2DResources(rw);
     }
-    return DefWindowProc(hWnd, message, wParam, lParam);
+
+    // trigger next frame (timer already used elsewhere)
+}
+
+// Foreground check and window procs
+static bool ForegroundIsOurWindow()
+{
+    HWND fg = GetForegroundWindow();
+    if (!fg) return false;
+    DWORD fgPid = 0;
+    GetWindowThreadProcessId(fg, &fgPid);
+    return (fgPid == GetCurrentProcessId());
+}
+
+// Window procedure used by render thread windows(uses input filtering)
+LRESULT CALLBACK FullWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+    RenderWindow* rw = (RenderWindow*)GetWindowLongPtrW(hWnd, GWLP_USERDATA);
+    switch (msg)
+    {
+        case WM_CREATE:
+            g_StartMouseInit = false;
+            // Create a Direct2D factory with multithread support
+            D2D1_FACTORY_OPTIONS options = {};
+            ID2D1Factory* pFactory = nullptr;
+
+            if (FAILED(D2D1CreateFactory(D2D1_FACTORY_TYPE_MULTI_THREADED, __uuidof(ID2D1Factory),
+                &options, reinterpret_cast<void**>(&pFactory))))
+            {
+                return -1; // Fail window creation
+            }
+
+            // Seed random number generator
+            std::srand(static_cast<unsigned int>(time(nullptr)));
+            // Start the timer for the animation loop
+            SetTimer(hWnd, 1, 16, NULL); // Timer ID 1, 16ms delay (~60 FPS)
+            return 0;
+        case WM_PAINT:
+            // Validate rect before drawing
+            RenderFrame(rw);
+            ValidateRect(hWnd, NULL);
+            return 0;
+        case WM_SIZE:
+            if (rw)
+            {
+                GetClientRect(hWnd, &rw->rc);
+                DestroyBackbuffer(rw);
+                CreateBackbuffer(rw);
+                g_StartMouseInit = false;
+            }
+            return 0;
+        case WM_KEYDOWN:
+        case WM_LBUTTONDOWN:
+        case WM_RBUTTONDOWN:
+        case WM_MBUTTONDOWN:
+        case WM_XBUTTONDOWN:
+        case WM_MOUSEMOVE:
+        {
+            LARGE_INTEGER now;
+            QueryPerformanceCounter(&now);
+            double seconds = double(now.QuadPart - g_StartCounter.QuadPart) / double(g_PerfFreq.QuadPart);
+            if (seconds < g_InputDebounceSeconds) { return 0; }
+            if (!ForegroundIsOurWindow()) { return 0; }
+            if (msg == WM_MOUSEMOVE)
+            {
+                POINT cur; GetCursorPos(&cur);
+                if (!g_StartMouseInit)
+                {
+                    g_StartMouse = cur;
+                    g_StartMouseInit = true;
+                    return 0;
+                }
+                int dx = abs(cur.x - g_StartMouse.x), dy = abs(cur.y - g_StartMouse.y);
+                if (dx < g_MouseMoveThreshold && dy < g_MouseMoveThreshold) { return 0; }
+            }
+            g_Running = false;
+            PostQuitMessage(0);
+            return 0;
+        }
+        case WM_TIMER:
+            // When the timer fires, redraw the window
+            if (wParam == 1)
+            { // Check for our timer ID
+                InvalidateRect(hWnd, NULL, FALSE); // Forces WM_PAINT without erasing background
+            }
+            return 0;
+        case WM_DESTROY:
+            // Clean up resources
+            KillTimer(hWnd, 1);
+            DiscardD2DResources();
+            SafeRelease(&pD2DFactory);
+            PostQuitMessage(0);
+            return 0;
+        default:
+            return DefWindowProcW(hWnd, msg, wParam, lParam);
+        }
 }
 
 // Preview proc
@@ -537,7 +613,7 @@ static DWORD WINAPI RenderThreadProc(LPVOID lpv)
     // initialize backbuffer and stars on this thread
     GetClientRect(hwnd, &rw->rc);
     CreateBackbuffer(rw);
-    InitStars(rw);
+    InitializeStars(rw);
 
     // optionally hide cursor for fullscreen effect
     // call ShowCursor(FALSE) until hidden; keep balanced on exit
@@ -566,18 +642,8 @@ static DWORD WINAPI RenderThreadProc(LPVOID lpv)
             DispatchMessageW(&msg);
         }
 
-        // time step
-        LARGE_INTEGER now;
-        QueryPerformanceCounter(&now);
-        double dt = double(now.QuadPart - last.QuadPart) / double(perfFreq.QuadPart);
-        last = now;
-        totalTime += dt;
-
         // render frame using your RenderFrame function; this draws into rw->backHdc
-        RenderFrame(rw, (float)dt, (float)totalTime);
-
-        // Blit backbuffer to screen already happens inside RenderFrame.
-        // If not, you would BitBlt here from rw->backHdc to the window DC.
+        RenderFrame(rw);
 
         // check stop event quickly
         if (rw->hStopEvent && WaitForSingleObject(rw->hStopEvent, 0) == WAIT_OBJECT_0) break;
@@ -620,7 +686,7 @@ static BOOL CALLBACK MonEnumProc(HMONITOR hMon, HDC, LPRECT, LPARAM)
     tp->rc = r;
     tp->ownerForParent = NULL; // no owner for top-level fullscreen windows
     tp->rw = rw;
-    tp->className = L"StarfieldFullClassThreaded";
+    tp->className = L"MyStarfieldCls";
 
     // spawn worker thread (thread creates window and does rendering)
     rw->hThread = CreateThread(NULL, 0, RenderThreadProc, tp, 0, &rw->threadId);
@@ -667,7 +733,7 @@ static void RunFull()
         double dt = double(now.QuadPart - last.QuadPart) / double(g_PerfFreq.QuadPart);
         last = now;
         total += dt;
-        for (auto rw : g_Windows) RenderFrame(rw, (float)dt, (float)total);
+        for (auto rw : g_Windows) RenderFrame(rw);
         Sleep(8);
     }
     for (auto rw : g_Windows)
@@ -705,7 +771,7 @@ static int RunPreview(HWND parent)
     random_device rd;
     rw->rng.seed(rd());
     CreateBackbuffer(rw);
-    InitStars(rw);
+    InitializeStars(rw);
     QueryPerformanceFrequency(&g_PerfFreq);
     LARGE_INTEGER last;
     QueryPerformanceCounter(&last);
@@ -723,7 +789,7 @@ static int RunPreview(HWND parent)
         QueryPerformanceCounter(&now);
         double dt = double(now.QuadPart - last.QuadPart) / double(g_PerfFreq.QuadPart);
         last = now; total += dt;
-        RenderFrame(rw, (float)dt, (float)total);
+        RenderFrame(rw);
         Sleep(15);
     }
     DestroyBackbuffer(rw);
@@ -778,7 +844,7 @@ LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPar
     {
         CreateSettingsControls(hWnd);
         SetDlgItemInt(hWnd, CID_EDIT_STARS, g_StarCount, FALSE);
-        SetDlgItemInt(hWnd, CID_EDIT_SPEED, g_Speed, FALSE);
+        SetDlgItemInt(hWnd, CID_EDIT_SPEED, g_StarSpeed, FALSE);
         return 0;
     }
     case WM_COMMAND:
@@ -825,11 +891,11 @@ LRESULT CALLBACK SettingsWndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lPar
             else stars = (int)fmax(1, fmin(g_MaxStars, stars));
 
             int speed = GetDlgItemInt(hWnd, CID_EDIT_SPEED, &ok, FALSE);
-            if (!ok) speed = g_Speed;
+            if (!ok) speed = g_StarSpeed;
             else speed = (int)fmax(1, fmin(g_MaxSpeed, speed));
 
             g_StarCount = stars;
-            g_Speed = speed;
+            g_StarSpeed = speed;
 
             SaveSettings();
             DestroyWindow(hWnd);
